@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Besu API Test</title>
+  </head>
+  <body>
+    <h1>Besu API Test</h1>
+    <button onclick="getBlockNumber()">Get Block Number</button>
+    <div id="result"></div>
+
+    <script>
+      async function getBlockNumber() {
+        const response = await fetch("http://localhost:8545", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_blockNumber",
+            params: [],
+            id: 1,
+          }),
+        });
+
+        const data = await response.json();
+        document.getElementById("result").innerText = JSON.stringify(
+          data,
+          null,
+          2
+        );
+      }
+    </script>
+  </body>
+</html>

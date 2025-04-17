@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ERPNext-Blockchain Integration Dashboard</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        padding-top: 20px;
+        background-color: #f8f9fa;
+      }
+      .blockchain-status {
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+      }
+      .status-connected {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+      .status-disconnected {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+      .card {
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .card-header {
+        font-weight: bold;
+      }
+      #documentTable th,
+      #documentTable td {
+        padding: 12px;
+      }
+      .timestamp {
+        font-size: 0.85em;
+        color: #6c757d;
+      }
+      .doctype-badge {
+        font-size: 0.85em;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1 class="mb-4 text-center">ERPNext-Blockchain Integration Dashboard</h1>
+
+      <div id="statusContainer" class="blockchain-status">
+        <div class="spinner-border spinner-border-sm" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        Connecting to blockchain...
+      </div>
+
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header bg-primary text-white">
+              Blockchain Status
+            </div>
+            <div class="card-body">
+              <p>
+                <strong>Current Block:</strong>
+                <span id="currentBlock">Loading...</span>
+              </p>
+              <p>
+                <strong>Documents Recorded:</strong>
+                <span id="documentCount">Loading...</span>
+              </p>
+              <p>
+                <strong>Contract Address:</strong>
+                <span id="contractAddress">Loading...</span>
+              </p>
+              <p>
+                <strong>Account Address:</strong>
+                <span id="accountAddress">Loading...</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="card">
+            <div class="card-header bg-success text-white">Verify Document</div>
+            <div class="card-body">
+              <form id="verifyForm">
+                <div class="mb-3">
+                  <label for="doctype" class="form-label">Document Type</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="doctype"
+                    required
+                  />
+                </div>
+                <div class="mb-3">
+                  <label for="docname" class="form-label">Document Name</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="docname"
+                    required
+                  />
+                </div>
+                <div class="mb-3">
+                  <label for="docdata" class="form-label"
+                    >Document Data (JSON)</label
+                  >
+                  <textarea
+                    class="form-control"
+                    id="docdata"
+                    rows="5"
+                    required
+                  ></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Verify</button>
+              </form>
+              <div id="verifyResult" class="mt-3"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header bg-dark text-white">Recent Documents</div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table id="documentTable" class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Document Type</th>
+                  <th>Name</th>
+                  <th>Event</th>
+                  <th>Hash</th>
+                  <th>Timestamp</th>
+                  <th>Block</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colspan="6" class="text-center">Loading documents...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Base URL for API calls
+      const API_BASE_URL = window.location.origin;
+
+      // Function to update blockchain status
+      async function updateBlockchainStatus() {
+        try {
+          const response = await fetch(`${API_BASE_URL}/health`);
+          const data = await response.json();
+
+          const statusContainer = document.getElementById("statusContainer");
+
+          if (data.success && data.blockchainConnected) {
+            statusContainer.className = "blockchain-status status-connected";
+            statusContainer.innerHTML = `
+                        <i class="bi bi-check-circle-fill"></i>
+                        Connected to blockchain - Block #${data.currentBlock}
+                    `;
+
+            document.getElementById("accountAddress").textContent =
+              data.account;
+          } else {
+            statusContainer.className = "blockchain-status status-disconnected";
+            statusContainer.innerHTML = `
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        Disconnected from blockchain - ${
+                          data.error || "Unknown error"
+                        }
+                    `;
+          }
+
+          // Update stats
+          updateStats();
+
+          // Schedule next update
+          setTimeout(updateBlockchainStatus, 10000);
+        } catch (error) {
+          const statusContainer = document.getElementById("statusContainer");
+          statusContainer.className = "blockchain-status status-disconnected";
+          statusContainer.innerHTML = `
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    Error connecting to middleware: ${error.message}
+                `;
+
+          // Retry after delay
+          setTimeout(updateBlockchainStatus, 15000);
+        }
+      }
+
+      // Function to update blockchain stats
+      async function updateStats() {
+        try {
+          const response = await fetch(`${API_BASE_URL}/stats`);
+          const data = await response.json();
+
+          if (data.success) {
+            document.getElementById("currentBlock").textContent =
+              data.blockNumber;
+            document.getElementById("documentCount").textContent =
+              data.documentCount;
+            document.getElementById("contractAddress").textContent =
+              data.contractAddress;
+          }
+        } catch (error) {
+          console.error("Error fetching stats:", error);
+        }
+      }
+
+      // Function to handle document verification
+      document
+        .getElementById("verifyForm")
+        .addEventListener("submit", async function (e) {
+          e.preventDefault();
+
+          const doctype = document.getElementById("doctype").value;
+          const name = document.getElementById("docname").value;
+          const dataStr = document.getElementById("docdata").value;
+
+          let data;
+          try {
+            data = JSON.parse(dataStr);
+          } catch (error) {
+            document.getElementById("verifyResult").innerHTML = `
+                    <div class="alert alert-danger">
+                        Invalid JSON data: ${error.message}
+                    </div>
+                `;
+            return;
+          }
+
+          try {
+            document.getElementById("verifyResult").innerHTML = `
+                    <div class="alert alert-info">
+                        Verifying document...
+                    </div>
+                `;
+
+            const response = await fetch(`${API_BASE_URL}/verify`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ doctype, name, data }),
+            });
+
+            const result = await response.json();
+
+            if (result.verified) {
+              document.getElementById("verifyResult").innerHTML = `
+                        <div class="alert alert-success">
+                            <h5>Document Verified! ✓</h5>
+                            <p><strong>Recorded on:</strong> ${result.timestamp}</p>
+                            <p><strong>Event:</strong> ${result.event}</p>
+                        </div>
+                    `;
+            } else {
+              document.getElementById("verifyResult").innerHTML = `
+                        <div class="alert alert-warning">
+                            <h5>Document Not Verified ✗</h5>
+                            <p>${result.message}</p>
+                        </div>
+                    `;
+            }
+          } catch (error) {
+            document.getElementById("verifyResult").innerHTML = `
+                    <div class="alert alert-danger">
+                        Error: ${error.message}
+                    </div>
+                `;
+          }
+        });
+
+      // Start blockchain status updates
+      updateBlockchainStatus();
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+  </body>
+</html>
