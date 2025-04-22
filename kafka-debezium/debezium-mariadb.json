@@ -1,0 +1,17 @@
+{
+  "name": "erpnext-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mariadb.MariaDbConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "admin",
+    "database.server.name": "erpnext",
+    "database.include.list": "erpnext_db",
+    "table.include.list": "erpnext_db.tabSalesOrder",
+    "database.history.kafka.bootstrap.servers": "kafka:9092",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState"
+  }
+}

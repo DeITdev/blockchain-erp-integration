@@ -1,0 +1,46 @@
+version: "3"
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - kafka_net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+    networks:
+      - kafka_net
+
+  connect:
+    image: debezium/connect:2.1
+    depends_on:
+      - kafka
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+    ports:
+      - "8083:8083"
+    networks:
+      - kafka_net
+
+networks:
+  kafka_net:
+    name: kafka_net
+    driver: bridge
