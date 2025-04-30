@@ -1,95 +1,110 @@
-const { Kafka } = require('kafkajs');
-const axios = require('axios');
 require('dotenv').config();
 
+const { Kafka } = require('kafkajs');
+const axios = require('axios');
+
+// Configure Kafka client
 const kafka = new Kafka({
-  clientId: 'blockchain-consumer',
-  brokers: [process.env.KAFKA_BROKER || 'localhost:29092'],
-  connectionTimeout: 10000, // 10 seconds
-  retry: {
-    initialRetryTime: 300,
-    retries: 10
-  }
+  brokers: [process.env.KAFKA_BROKER], // Using the external port mapped in docker-compose
+  clientId: 'erp-blockchain-consumer'
 });
 
-const consumer = kafka.consumer({
-  groupId: 'blockchain-group'
-});
+// Create consumer instance
+const consumer = kafka.consumer({ groupId: 'erpnext-blockchain-group' });
 
-async function run() {
+// Topic to listen for (will match our configured Debezium connector)
+const topic = 'erpnext._5e5899d8398b5f7b.tabUser';
+
+// For storing user data in blockchain (optional, based on your requirements)
+const storeUserInBlockchain = async (userData) => {
   try {
-    console.log('Connecting to Kafka broker at:', process.env.KAFKA_BROKER || 'localhost:29092');
-    await consumer.connect();
+    // Extract phone field and convert to integer
+    const phoneValue = userData.phone ? parseInt(userData.phone, 10) : 0;
 
-    console.log('Subscribing to topic: erpnext');
-    await consumer.subscribe({
-      topic: 'erpnext.erpnext_db.tabUser',
-      fromBeginning: true
+    console.log(`Extracted phone value: ${phoneValue} (type: ${typeof phoneValue})`);
+
+    // Send to blockchain
+    const response = await axios.post(process.env.API_ENDPOINT, {
+      privateKey: process.env.PRIVATE_KEY,
+      contractAddress: process.env.CONTRACT_ADDRESS,
+      value: phoneValue
     });
 
-    console.log('Starting consumer...');
+    console.log(`Stored in blockchain, response:`, response.data);
+  } catch (error) {
+    console.error('Error storing data in blockchain:', error.message);
+  }
+};
+
+// Main consumer function
+async function run() {
+  try {
+    // Connect to Kafka
+    await consumer.connect();
+    console.log('Connected to Kafka');
+
+    // Subscribe to the tabUser topic
+    await consumer.subscribe({ topic: topic, fromBeginning: true });
+    console.log(`Subscribed to topic: ${topic}`);
+
+    // Consume messages
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         try {
-          console.log(`Received message from topic: ${topic}`);
-          console.log(`Message key: ${message.key?.toString()}`);
-          console.log(`Message value: ${message.value?.toString().substring(0, 200)}...`);
+          // Parse message value
+          const messageValue = message.value.toString();
+          const event = JSON.parse(messageValue);
 
-          const event = JSON.parse(message.value.toString());
+          // Log the received event
+          console.log('\n----- CDC Event Received -----');
+          console.log(`Topic: ${topic}`);
+          console.log(`Partition: ${partition}`);
+          console.log(`Offset: ${message.offset}`);
+          console.log(`Timestamp: ${new Date(parseInt(message.timestamp)).toISOString()}`);
 
-          // Extract a numeric value from the event
-          const numericValue = event.after && event.after.modified ?
-            new Date(event.after.modified).getTime() : Date.now();
+          // Log the event details
+          if (event.op) {
+            console.log(`Operation: ${event.op}`); // c=create, u=update, d=delete
+          }
 
-          console.log(`Extracted value: ${numericValue}`);
+          console.log('User data:');
+          console.log(JSON.stringify(event.after || event, null, 2));
 
-          // Send to blockchain API
-          const response = await axios.post(process.env.API_ENDPOINT, {
-            privateKey: process.env.PRIVATE_KEY,
-            contractAddress: process.env.CONTRACT_ADDRESS,
-            value: Math.floor(numericValue)
-          });
+          // Store in blockchain if needed
+          if (event.after) {
+            await storeUserInBlockchain(event.after);
+          } else if (event) {
+            await storeUserInBlockchain(event);
+          }
 
-          console.log('Blockchain response:', response.data);
-          console.log(`Successfully stored value: ${numericValue} on blockchain`);
-        } catch (err) {
-          console.error('Error processing message:', err.message);
-          console.error(err.stack);
+          console.log('----- End of CDC Event -----\n');
+        } catch (error) {
+          console.error('Error processing message:', error);
+          console.error('Message content:', message.value.toString());
         }
       },
     });
-  } catch (err) {
-    console.error('Consumer error:', err.message);
-    console.error(err.stack);
+
+    console.log('Consumer started and waiting for messages...');
+
+  } catch (error) {
+    console.error('Fatal error in consumer:', error);
     process.exit(1);
   }
 }
 
-// Handle graceful shutdown
-const errorTypes = ['unhandledRejection', 'uncaughtException'];
-const signalTraps = ['SIGTERM', 'SIGINT', 'SIGUSR2'];
-
-errorTypes.forEach(type => {
-  process.on(type, async e => {
-    console.error(`${type}: ${e.message}`);
-    try {
-      await consumer.disconnect();
-      process.exit(0);
-    } catch (_) {
-      process.exit(1);
-    }
-  });
-});
-
-signalTraps.forEach(type => {
-  process.once(type, async () => {
-    try {
-      await consumer.disconnect();
-    } finally {
-      process.kill(process.pid, type);
-    }
-  });
-});
-
-console.log('Starting Kafka consumer...');
+// Start the consumer
 run().catch(console.error);
+
+// Handle termination signals
+process.on('SIGINT', async () => {
+  console.log('Disconnecting consumer...');
+  await consumer.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('Disconnecting consumer...');
+  await consumer.disconnect();
+  process.exit(0);
+});

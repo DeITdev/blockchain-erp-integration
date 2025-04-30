@@ -100,6 +100,7 @@ services:
       - --binlog-format=ROW
       - --log-bin=mysql-bin
       - --server-id=1
+      - --binlog-row-image=FULL
     environment:
       MYSQL_ROOT_PASSWORD: admin
       MARIADB_ROOT_PASSWORD: admin

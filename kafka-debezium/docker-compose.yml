@@ -9,17 +9,11 @@ services:
       - "2181:2181"
     networks:
       - kafka_net
-    healthcheck:
-      test: echo srvr | nc zookeeper 2181 || exit 1
-      interval: 10s
-      retries: 20
-      start_period: 10s
 
   kafka:
     image: confluentinc/cp-kafka:7.3.0
     depends_on:
-      zookeeper:
-        condition: service_healthy
+      - zookeeper
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -32,23 +26,17 @@ services:
       - "9092:9092"
     networks:
       - kafka_net
-    healthcheck:
-      test: kafka-topics --bootstrap-server kafka:9092 --list || exit 1
-      interval: 10s
-      retries: 20
-      start_period: 30s
 
   connect:
     image: debezium/connect:2.1
     depends_on:
-      kafka:
-        condition: service_healthy
+      - kafka
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
       GROUP_ID: 1
       CONFIG_STORAGE_TOPIC: connect_configs
       OFFSET_STORAGE_TOPIC: connect_offsets
-      STATUS_STORAGE_TOPIC: connect_status
+      STATUS_STORAGE_TOPIC: connect_statuses
       KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
@@ -59,6 +47,20 @@ services:
       - kafka_net
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Kafka UI - changed port from 8080 to 8085
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    ports:
+      - "8085:8080" # Changed from 8080:8080 to 8085:8080
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - kafka_net
 
 networks:
   kafka_net:
