@@ -1,0 +1,27 @@
+{
+  "name": "attendance-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+    "tasks.max": "1",
+    "database.hostname": "host.docker.internal",
+    "database.port": "3306",
+    "database.user": "root",
+    "database.password": "admin",
+    "database.server.id": "184056",
+    "topic.prefix": "erpnext",
+    "database.include.list": "_5e5899d8398b5f7b",
+    "table.include.list": "_5e5899d8398b5f7b.tabAttendance",
+    "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
+    "schema.history.internal.kafka.topic": "schema-changes.erpnext.attendance",
+    "schema.history.internal.consumer.security.protocol": "PLAINTEXT",
+    "schema.history.internal.producer.security.protocol": "PLAINTEXT",
+    "include.schema.changes": "true",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "snapshot.mode": "initial",
+    "snapshot.locking.mode": "none",
+    "database.allowPublicKeyRetrieval": "true"
+  }
+}
