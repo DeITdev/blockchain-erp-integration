@@ -9,11 +9,19 @@ services:
       - "2181:2181"
     networks:
       - kafka_net
+    healthcheck:
+      # Simplified healthcheck that just checks if the port is listening
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   kafka:
     image: confluentinc/cp-kafka:7.3.0
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -21,16 +29,34 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Added settings for faster topic creation
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     ports:
       - "29092:29092"
       - "9092:9092"
     networks:
       - kafka_net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-topics",
+          "--bootstrap-server",
+          "localhost:9092",
+          "--list",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   connect:
     image: debezium/connect:2.1
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
       GROUP_ID: 1
@@ -47,12 +73,19 @@ services:
       - kafka_net
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # Kafka UI - changed port from 8080 to 8085
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     ports:
       - "8085:8080" # Changed from 8080:8080 to 8085:8080
     environment:
@@ -61,6 +94,29 @@ services:
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     networks:
       - kafka_net
+
+  # Consumer service using existing .env file
+  consumer:
+    build:
+      context: ../consumer
+      dockerfile: Dockerfile
+    depends_on:
+      - kafka
+    volumes:
+      - ../consumer/.env:/app/.env
+    networks:
+      - kafka_net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: on-failure:5
+    # Create a custom entry script that waits before starting the consumer
+    entrypoint: >
+      sh -c '
+        echo "Waiting 60 seconds for Kafka infrastructure to fully initialize..."
+        sleep 60
+        echo "Starting consumer..."
+        node consumer.js
+      '
 
 networks:
   kafka_net:
