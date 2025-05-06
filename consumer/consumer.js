@@ -11,12 +11,18 @@ const axios = require('axios');
 // Get environment variables with fallbacks
 const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:29092';
 const apiEndpoint = process.env.API_ENDPOINT || 'http://localhost:4001/store';
-const apiEndpointEmployee = process.env.API_ENDPOINT_EMPLOYEE || 'http://localhost:4001/store-employee';
-const apiEndpointAttendance = process.env.API_ENDPOINT_ATTENDANCE || 'http://localhost:4001/store-attendance';
 const privateKey = process.env.PRIVATE_KEY;
-const contractAddress = process.env.CONTRACT_ADDRESS;
-const contractAddressEmployee = process.env.CONTRACT_ADDRESS_EMPLOYEE;
-const contractAddressAttendance = process.env.CONTRACT_ADDRESS_ATTENDANCE;
+
+// Define contract addresses from environment variables
+const registryAddress = process.env.REGISTRY_CONTRACT_ADDRESS;
+const basicInfoAddress = process.env.BASIC_INFO_CONTRACT_ADDRESS;
+const datesAddress = process.env.DATES_CONTRACT_ADDRESS;
+const contactInfoAddress = process.env.CONTACT_INFO_CONTRACT_ADDRESS;
+const basicEmploymentAddress = process.env.BASIC_EMPLOYMENT_CONTRACT_ADDRESS;
+const careerAddress = process.env.CAREER_CONTRACT_ADDRESS;
+const approvalAddress = process.env.APPROVAL_CONTRACT_ADDRESS;
+const financialAddress = process.env.FINANCIAL_CONTRACT_ADDRESS;
+const personalAddress = process.env.PERSONAL_CONTRACT_ADDRESS;
 
 // Configure Kafka client with retry settings
 const kafka = new Kafka({
@@ -43,11 +49,11 @@ const userTopic = 'erpnext._5e5899d8398b5f7b.tabUser';
 const employeeTopic = 'erpnext._5e5899d8398b5f7b.tabEmployee';
 const attendanceTopic = 'erpnext._5e5899d8398b5f7b.tabAttendance';
 
-// For storing user data in blockchain
+// For storing user data in blockchain (simple storage)
 const storeUserInBlockchain = async (userData) => {
   try {
     // Check if required environment variables are set
-    if (!privateKey || !contractAddress) {
+    if (!privateKey || !process.env.CONTRACT_ADDRESS) {
       console.error('Missing PRIVATE_KEY or CONTRACT_ADDRESS environment variables');
       return;
     }
@@ -67,7 +73,7 @@ const storeUserInBlockchain = async (userData) => {
         // Send to blockchain
         const response = await axios.post(apiEndpoint, {
           privateKey: privateKey,
-          contractAddress: contractAddress,
+          contractAddress: process.env.CONTRACT_ADDRESS,
           value: phoneValue
         });
 
@@ -94,95 +100,148 @@ const storeUserInBlockchain = async (userData) => {
   }
 };
 
-// For storing employee data in blockchain
+// For storing employee data in blockchain using multiple contracts
+// For storing employee data in blockchain using multiple contracts
 const storeEmployeeInBlockchain = async (employeeData) => {
   try {
     // Check if required environment variables are set
-    if (!privateKey || !contractAddressEmployee) {
-      console.error('Missing PRIVATE_KEY or CONTRACT_ADDRESS_EMPLOYEE environment variables');
+    if (!privateKey) {
+      console.error('Missing PRIVATE_KEY environment variable');
       return;
     }
 
     // Log the raw employee data for debugging
     console.log('Raw employee data:', JSON.stringify(employeeData));
 
-    // Extract employee fields safely
-    const id = employeeData.name ? employeeData.name.replace(/\D/g, '') : "0";
-    const firstName = employeeData.first_name || "";
-    const gender = employeeData.gender || "";
+    // Generate an employee ID from the name or create a random one
+    const employeeId = employeeData.name ?
+      parseInt(employeeData.name.replace(/\D/g, ''), 10) ||
+      Math.floor(Math.random() * 1000000) :
+      Math.floor(Math.random() * 1000000);
 
-    // Safely parse date of birth
-    let dateOfBirth = 0;
-    if (employeeData.date_of_birth) {
+    // Extract employee name
+    const employeeName = employeeData.employee_name ||
+      `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim() ||
+      `Employee ${employeeId}`;
+
+    console.log(`Processing employee with ID: ${employeeId}, Name: ${employeeName}`);
+
+    // Prepare basic employee data with correct field names
+    const basicEmployeeData = {
+      id: employeeId,
+      name: employeeId.toString(),
+      first_name: employeeData.first_name || '',
+      middle_name: employeeData.middle_name || '',
+      last_name: employeeData.last_name || '',
+      employee_name: employeeName,
+      gender: employeeData.gender || '',
+      company: employeeData.company || '',
+      department: employeeData.department || '',
+      designation: employeeData.designation || '',
+
+      // Format dates correctly
+      date_of_birth: employeeData.date_of_birth ?
+        Math.floor(new Date(employeeData.date_of_birth).getTime() / 1000) : 0,
+      date_of_joining: employeeData.date_of_joining ?
+        Math.floor(new Date(employeeData.date_of_joining).getTime() / 1000) : 0,
+
+      phone: employeeData.phone || employeeData.cell_number || '',
+      cell_number: employeeData.phone || employeeData.cell_number || '',
+
+      status: employeeData.status || 'Active'
+    };
+
+    // Store basic data - try with setupEmployeeComplete
+    try {
+      console.log(`Using complete setup endpoint...`);
+      const response = await axios.post('http://localhost:4001/api/v2/employee/setup-employee-complete', {
+        privateKey: privateKey,
+        employeeData: basicEmployeeData
+      });
+
+      console.log(`Employee data stored successfully:`, response.data);
+      return true;
+    } catch (error) {
+      console.error('Error in setup endpoint:', error.message);
+      if (error.response) {
+        console.error('Response error:', error.response.status, error.response.data);
+      }
+
+      // If complete setup fails, fall back to individual endpoints
+      console.log('Falling back to individual contract updates...');
+
+      // Store basic info
       try {
-        // Try to parse as ISO string or various formats
-        const dobDate = new Date(employeeData.date_of_birth);
-        if (!isNaN(dobDate.getTime())) {
-          dateOfBirth = Math.floor(dobDate.getTime() / 1000);
+        if (basicInfoAddress) {
+          console.log(`Storing basic info in contract: ${basicInfoAddress}`);
+          await axios.post('http://localhost:4001/api/v2/employee/store-basic-info', {
+            privateKey: privateKey,
+            contractAddress: basicInfoAddress,
+            employeeId: employeeId,
+            basicInfo: {
+              firstName: employeeData.first_name || '',
+              middleName: employeeData.middle_name || '',
+              lastName: employeeData.last_name || '',
+              fullName: employeeName,
+              gender: employeeData.gender || '',
+              company: employeeData.company || '',
+              department: employeeData.department || '',
+              designation: employeeData.designation || '',
+              status: employeeData.status || 'Active'
+            }
+          });
+          console.log('Basic info stored successfully');
         }
       } catch (error) {
-        console.error('Error parsing date of birth:', error.message);
+        console.error('Error storing basic info:', error.message);
       }
-    }
 
-    // Safely parse date of joining
-    let dateOfJoining = 0;
-    if (employeeData.date_of_joining) {
-      try {
-        // Try to parse as ISO string or various formats
-        const dojDate = new Date(employeeData.date_of_joining);
-        if (!isNaN(dojDate.getTime())) {
-          dateOfJoining = Math.floor(dojDate.getTime() / 1000);
-        }
-      } catch (error) {
-        console.error('Error parsing date of joining:', error.message);
-      }
-    }
-
-    const company = employeeData.company || "";
-
-    console.log(`Processing employee data: ID=${id}, Name=${firstName}, Company=${company}`);
-    console.log(`Date values (Unix timestamps): Birth=${dateOfBirth}, Joining=${dateOfJoining}`);
-    console.log(`Sending to API endpoint: ${apiEndpointEmployee}`);
-
-    // Retry logic for blockchain API calls
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      try {
-        // Send to blockchain
-        const response = await axios.post(apiEndpointEmployee, {
-          privateKey: privateKey,
-          contractAddress: contractAddressEmployee,
-          id: parseInt(id, 10) || 0,
-          firstName: firstName,
-          gender: gender,
-          dateOfBirth: dateOfBirth,
-          dateOfJoining: dateOfJoining,
-          company: company
-        });
-
-        console.log(`Stored employee in blockchain, response:`, response.data);
-        return; // Success, exit the function
-      } catch (error) {
-        attempts++;
-        console.error(`Attempt ${attempts}/${maxAttempts} failed:`, error.message);
-
-        if (attempts >= maxAttempts) {
-          throw error; // Re-throw if all attempts failed
-        }
-
-        // Wait before retrying (exponential backoff)
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
-      }
+      // If all else fails, store in simple contract
+      console.log('Storing in simple contract as fallback...');
+      await storeSimpleEmployeeData(employeeData);
     }
   } catch (error) {
     console.error('Error storing employee data in blockchain:', error.message);
-    // If axios error, log more details
     if (error.response) {
       console.error('API response error:', error.response.status, error.response.data);
     }
+    return false;
+  }
+};
+
+// Fallback function to store basic employee data in simple storage contract
+const storeSimpleEmployeeData = async (employeeData) => {
+  try {
+    if (!privateKey || !process.env.CONTRACT_ADDRESS) {
+      console.error('Missing PRIVATE_KEY or CONTRACT_ADDRESS environment variables');
+      return false;
+    }
+
+    // Extract a numeric value to store (employee ID or phone number)
+    const employeeId = employeeData.name ?
+      parseInt(employeeData.name.replace(/\D/g, ''), 10) : null;
+
+    const phoneValue = employeeData.phone ?
+      parseInt(employeeData.phone, 10) : null;
+
+    const valueToStore = employeeId || phoneValue || Math.floor(Math.random() * 1000000);
+
+    console.log(`Storing employee data in simple storage: value=${valueToStore}`);
+
+    const response = await axios.post(apiEndpoint, {
+      privateKey: privateKey,
+      contractAddress: process.env.CONTRACT_ADDRESS,
+      value: valueToStore
+    });
+
+    console.log(`Stored simple employee data, response:`, response.data);
+    return true;
+  } catch (error) {
+    console.error('Error storing simple employee data:', error.message);
+    if (error.response) {
+      console.error('API response error:', error.response.status, error.response.data);
+    }
+    return false;
   }
 };
 
@@ -190,7 +249,7 @@ const storeEmployeeInBlockchain = async (employeeData) => {
 const storeAttendanceInBlockchain = async (attendanceData) => {
   try {
     // Check if required environment variables are set
-    if (!privateKey || !contractAddressAttendance) {
+    if (!privateKey || !process.env.CONTRACT_ADDRESS_ATTENDANCE) {
       console.error('Missing PRIVATE_KEY or CONTRACT_ADDRESS_ATTENDANCE environment variables');
       return;
     }
@@ -224,7 +283,7 @@ const storeAttendanceInBlockchain = async (attendanceData) => {
     }
 
     console.log(`Processing attendance data: ID=${id}, Employee=${employeeName}, Date=${attendanceDate}, Status=${status}`);
-    console.log(`Sending to API endpoint: ${apiEndpointAttendance}`);
+    console.log(`Sending to API endpoint: ${process.env.API_ENDPOINT_ATTENDANCE || 'http://localhost:4001/store-attendance'}`);
 
     // Retry logic for blockchain API calls
     let attempts = 0;
@@ -233,9 +292,9 @@ const storeAttendanceInBlockchain = async (attendanceData) => {
     while (attempts < maxAttempts) {
       try {
         // Send to blockchain
-        const response = await axios.post(apiEndpointAttendance, {
+        const response = await axios.post(process.env.API_ENDPOINT_ATTENDANCE || 'http://localhost:4001/store-attendance', {
           privateKey: privateKey,
-          contractAddress: contractAddressAttendance,
+          contractAddress: process.env.CONTRACT_ADDRESS_ATTENDANCE,
           id: id,
           employeeName: employeeName,
           attendanceDate: attendanceDate,
