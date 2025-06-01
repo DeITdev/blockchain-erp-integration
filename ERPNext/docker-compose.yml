@@ -1,8 +1,6 @@
-version: "3"
-
 services:
   backend:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -18,7 +16,7 @@ services:
       MARIADB_ROOT_PASSWORD: admin
 
   configurator:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -47,7 +45,7 @@ services:
       - logs:/home/frappe/frappe-bench/logs
 
   create-site:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -108,7 +106,7 @@ services:
       - db-data:/var/lib/mysql
 
   frontend:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     depends_on:
@@ -134,7 +132,7 @@ services:
       - "8080:8080"
 
   queue-long:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -150,7 +148,7 @@ services:
       - logs:/home/frappe/frappe-bench/logs
 
   queue-short:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -182,9 +180,11 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+    volumes:
+      - redis-cache-data:/data # Add this line
 
   scheduler:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -198,7 +198,7 @@ services:
       - logs:/home/frappe/frappe-bench/logs
 
   websocket:
-    image: frappe/erpnext:v15.58.2
+    image: frappe/erpnext:latest
     networks:
       - frappe_network
     deploy:
@@ -214,6 +214,7 @@ services:
 volumes:
   db-data:
   redis-queue-data:
+  redis-cache-data:
   sites:
   logs:
 
