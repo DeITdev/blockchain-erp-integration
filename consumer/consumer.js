@@ -6,514 +6,213 @@ try {
 }
 
 const { Kafka } = require('kafkajs');
-const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
 
 // Get environment variables with fallbacks
 const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:29092';
-const apiBaseEndpoint = process.env.API_ENDPOINT || 'http://localhost:4001';
-const privateKey = process.env.PRIVATE_KEY || '8f2a55949038a9610f50fb23b5883af3b4ecb3c3bb792cbcefbd1542c692be63';
 
-// Define contract addresses from environment variables
-const registryAddress = process.env.REGISTRY_CONTRACT_ADDRESS || '0xDE87AF9156a223404885002669D3bE239313Ae33';
-const basicInfoAddress = process.env.BASIC_INFO_CONTRACT_ADDRESS || '0x686AfD6e502A81D2e77f2e038A23C0dEf4949A20';
-const datesAddress = process.env.DATES_CONTRACT_ADDRESS || '0x664D6EbAbbD5cf656eD07A509AFfBC81f9615741';
-const contactInfoAddress = process.env.CONTACT_INFO_CONTRACT_ADDRESS || '0x37A49B1F380c74e47A1544Ac2BB5404FF159275c';
-const basicEmploymentAddress = process.env.BASIC_EMPLOYMENT_CONTRACT_ADDRESS || '0x1Be01cBe5a96FBAc978B3f25C3eB5d541233Ab27';
-const careerAddress = process.env.CAREER_CONTRACT_ADDRESS || '0x1024d31846670b356f952F4c002E3758Ab9c4FFC';
-const approvalAddress = process.env.APPROVAL_CONTRACT_ADDRESS || '0xE6BAb1eAc80e9d68BD76c3bb61abad86133109DD';
-const financialAddress = process.env.FINANCIAL_CONTRACT_ADDRESS || '0x0d8425cEa91B9c8d7Dd2bE278Fb945aF78Aba57b';
-const personalAddress = process.env.PERSONAL_CONTRACT_ADDRESS || '0x520F3536Ce622A9C90d9E355b2547D9e5cfb76fE';
-const attendanceContractAddress = process.env.CONTRACT_ADDRESS_ATTENDANCE || '0x6486A01e45648B1aDCc51D375Af3a7c0a5e9002a';
+// Create a processed records tracker for debugging (optional)
+const PROCESSED_RECORDS_FILE = path.join(__dirname, 'cdc_events_log.json');
+let processedRecords = [];
 
-// Create a processed records tracker
-const PROCESSED_RECORDS_FILE = path.join(__dirname, 'processed_records.json');
-let processedRecords = new Set();
-
-// Load previously processed records
+// Load previously processed records for reference
 async function loadProcessedRecords() {
   try {
     const data = await fs.readFile(PROCESSED_RECORDS_FILE, 'utf8');
-    const records = JSON.parse(data);
-    processedRecords = new Set(records);
-    console.log(`Loaded ${processedRecords.size} previously processed records`);
+    processedRecords = JSON.parse(data);
+    console.log(`Loaded ${processedRecords.length} previously logged CDC events for reference`);
   } catch (error) {
-    // File might not exist yet, which is fine
-    console.log('No processed records file found, starting fresh');
+    console.log('No previous CDC events log found, starting fresh');
+    processedRecords = [];
   }
 }
 
-// Save processed records
-async function saveProcessedRecords() {
+// Save CDC events log
+async function saveCDCEventLog(eventData) {
   try {
-    const recordsArray = Array.from(processedRecords);
-    await fs.writeFile(PROCESSED_RECORDS_FILE, JSON.stringify(recordsArray));
+    processedRecords.push(eventData);
+    // Keep only the last 1000 events to prevent file from growing too large
+    if (processedRecords.length > 1000) {
+      processedRecords = processedRecords.slice(-1000);
+    }
+    await fs.writeFile(PROCESSED_RECORDS_FILE, JSON.stringify(processedRecords, null, 2));
   } catch (error) {
-    console.error('Error saving processed records:', error);
+    console.error('Error saving CDC event log:', error);
   }
 }
 
-// Configure Kafka client with retry settings and rebalance settings
+// Configure Kafka client
 const kafka = new Kafka({
   brokers: [kafkaBroker],
-  clientId: 'erp-blockchain-consumer',
+  clientId: 'erpnext-cdc-tracker',
   retry: {
     initialRetryTime: 5000,
     retries: 15
   }
 });
 
-// Create consumer instance with longer session timeouts to prevent frequent rebalancing
+// Create consumer instance
 const consumer = kafka.consumer({
-  groupId: 'erpnext-blockchain-group',
-  sessionTimeout: 60000, // 60 seconds
-  heartbeatInterval: 10000, // 10 seconds
+  groupId: 'erpnext-cdc-tracking-group',
+  sessionTimeout: 60000,
+  heartbeatInterval: 10000,
   retry: {
     initialRetryTime: 5000,
     retries: 15
   }
 });
 
-// Topics to listen for
-const userTopic = 'erpnext._5e5899d8398b5f7b.tabUser';
-const employeeTopic = 'erpnext._5e5899d8398b5f7b.tabEmployee';
-const attendanceTopic = 'erpnext._5e5899d8398b5f7b.tabAttendance';
+// Topics to listen for (based on the new ERPNext database)
+const employeeTopic = 'erpnext._0775ec53bab106f5.tabEmployee';
+const userTopic = 'erpnext._0775ec53bab106f5.tabUser';
 
-// Utility function to create record ID from topic and offset
-function createRecordId(topic, offset) {
-  return `${topic}-${offset}`;
+// Function to detect operation type from ERPNext CDC events
+function detectOperationType(event) {
+  // Check for standard Debezium operation field
+  if (event.op) {
+    return event.op;
+  }
+
+  // For ERPNext CDC events, we need to analyze the data
+  const isDeleted = event.__deleted === true || event.__deleted === "true";
+
+  if (isDeleted) {
+    return 'd'; // DELETE
+  }
+
+  // Check if this looks like a snapshot/initial read
+  // Usually these have creation timestamps but no clear operation indicator
+  if (event.creation && !event.modified) {
+    return 'r'; // READ (snapshot)
+  }
+
+  // If we have both creation and modified timestamps, check which is more recent
+  if (event.creation && event.modified) {
+    // Convert timestamps if they're in microseconds (ERPNext format)
+    const creationTime = typeof event.creation === 'number' ? event.creation : Date.parse(event.creation);
+    const modifiedTime = typeof event.modified === 'number' ? event.modified : Date.parse(event.modified);
+
+    // If modified time is significantly different from creation time, it's likely an update
+    if (Math.abs(modifiedTime - creationTime) > 1000000) { // 1 second in microseconds
+      return 'u'; // UPDATE
+    }
+  }
+
+  // If we can't determine, assume it's a CREATE/READ operation
+  return 'c'; // CREATE (default assumption)
 }
 
-// For storing employee data directly using specific contracts
-// For storing employee data directly using specific contracts
-const storeEmployeeDataIndividually = async (employeeData) => {
-  try {
-    // Check if private key is set
-    if (!privateKey) {
-      console.error('Missing PRIVATE_KEY environment variable');
-      return false;
+// Function to format and display CDC event data
+function formatCDCEvent(topic, message, event) {
+  const timestamp = new Date(parseInt(message.timestamp)).toISOString();
+
+  // Detect operation type for ERPNext events
+  const operation = detectOperationType(event);
+
+  const operationMap = {
+    'c': 'CREATE',
+    'u': 'UPDATE',
+    'd': 'DELETE',
+    'r': 'READ (Snapshot)',
+    'read': 'READ (Snapshot)',
+    'create': 'CREATE',
+    'update': 'UPDATE',
+    'delete': 'DELETE'
+  };
+
+  const formattedEvent = {
+    timestamp,
+    topic,
+    offset: message.offset,
+    partition: message.partition,
+    operation: operationMap[operation] || operation,
+    tableName: topic.split('.').pop(),
+    database: topic.split('.')[1],
+    rawEvent: event,
+    detectedOperation: operation // Keep the detected operation for debugging
+  };
+
+  // For ERPNext format, the event itself IS the data
+  // Remove special Debezium/ERPNext fields to get clean record data
+  const specialFields = ['__deleted', '_assign', '_comments', '_liked_by', '_user_tags'];
+  const cleanData = { ...event };
+  specialFields.forEach(field => delete cleanData[field]);
+
+  if (operation === 'd') {
+    // For deletes, the data represents what was deleted
+    formattedEvent.deletedData = cleanData;
+  } else {
+    // For creates, updates, reads - this is the current/new data
+    formattedEvent.data = cleanData;
+
+    // For updates, we don't have "before" data in this format
+    // The entire event represents the current state after the change
+    if (operation === 'u') {
+      formattedEvent.dataAfter = cleanData;
+      formattedEvent.dataBefore = null; // Not available in this CDC format
     }
-
-    // Generate an employee ID from the name or create a random one
-    const employeeId = employeeData.name ?
-      parseInt(employeeData.name.replace(/\D/g, ''), 10) ||
-      Math.floor(Math.random() * 1000000) :
-      Math.floor(Math.random() * 1000000);
-
-    // Extract employee name
-    const employeeName = employeeData.employee_name ||
-      `${employeeData.first_name || ''} ${employeeData.last_name || ''}`.trim() ||
-      `Employee ${employeeId}`;
-
-    console.log(`Processing employee with ID: ${employeeId}, Name: ${employeeName}`);
-
-    // Format dates correctly
-    const dateOfBirth = employeeData.date_of_birth ?
-      (typeof employeeData.date_of_birth === 'number' ? employeeData.date_of_birth :
-        Math.floor(new Date(employeeData.date_of_birth).getTime() / 1000)) : 0;
-
-    const dateOfJoining = employeeData.date_of_joining ?
-      (typeof employeeData.date_of_joining === 'number' ? employeeData.date_of_joining :
-        Math.floor(new Date(employeeData.date_of_joining).getTime() / 1000)) : 0;
-
-    const dateOfRetirement = employeeData.date_of_retirement ?
-      (typeof employeeData.date_of_retirement === 'number' ? employeeData.date_of_retirement :
-        Math.floor(new Date(employeeData.date_of_retirement).getTime() / 1000)) : 0;
-
-    // Register the employee in the registry first
-    if (registryAddress) {
-      try {
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/register-employee`, {
-          privateKey: privateKey,
-          registryAddress: registryAddress,
-          employeeId: employeeId,
-          employeeName: employeeName
-        }, {
-          timeout: 15000
-        });
-        console.log(`Employee ${employeeId} registered in registry`);
-      } catch (error) {
-        console.log(`Employee ${employeeId} likely already registered in registry`);
-      }
-    }
-
-    // Store data in all nine contracts - wrap each in try/catch to continue
-    // even if some fail
-    const results = {
-      success: false,
-      basicInfo: false,
-      dates: false,
-      contact: false,
-      employment: false,
-      career: false,
-      approval: false,
-      financial: false,
-      personal: false
-    };
-
-    // 1. Store basic info
-    if (basicInfoAddress) {
-      try {
-        console.log(`Storing basic info in contract: ${basicInfoAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-basic-info`, {
-          privateKey: privateKey,
-          contractAddress: basicInfoAddress,
-          employeeId: employeeId,
-          basicInfo: {
-            firstName: employeeData.first_name || '',
-            middleName: employeeData.middle_name || '',
-            lastName: employeeData.last_name || '',
-            fullName: employeeName,
-            gender: employeeData.gender || '',
-            salutation: employeeData.salutation || '',
-            company: employeeData.company || '',
-            department: employeeData.department || '',
-            designation: employeeData.designation || '',
-            status: employeeData.status || 'Active'
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Basic info stored successfully');
-        results.basicInfo = true;
-      } catch (error) {
-        console.error('Error storing basic info:', error.message);
-      }
-    }
-
-    // 2. Store dates
-    if (datesAddress) {
-      try {
-        console.log(`Storing dates in contract: ${datesAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-dates`, {
-          privateKey: privateKey,
-          contractAddress: datesAddress,
-          employeeId: employeeId,
-          dates: {
-            dateOfBirth: dateOfBirth,
-            dateOfJoining: dateOfJoining,
-            dateOfRetirement: dateOfRetirement,
-            creationDate: employeeData.creation ? Math.floor(employeeData.creation / 1000000) : 0,
-            modificationDate: employeeData.modified ? Math.floor(employeeData.modified / 1000000) : 0,
-            scheduledConfirmationDate: employeeData.scheduled_confirmation_date || 0,
-            finalConfirmationDate: employeeData.final_confirmation_date || 0,
-            contractEndDate: employeeData.contract_end_date || 0,
-            resignationLetterDate: employeeData.resignation_letter_date || 0,
-            relievingDate: employeeData.relieving_date || 0,
-            encashmentDate: employeeData.encashment_date || 0,
-            heldOnDate: employeeData.held_on || 0
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Dates stored successfully');
-        results.dates = true;
-      } catch (error) {
-        console.error('Error storing dates:', error.message);
-      }
-    }
-
-    // 3. Store contact info
-    if (contactInfoAddress) {
-      try {
-        console.log(`Storing contact info in contract: ${contactInfoAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-contact-info`, {
-          privateKey: privateKey,
-          contractAddress: contactInfoAddress,
-          employeeId: employeeId,
-          contactInfo: {
-            cellNumber: employeeData.cell_number || '',
-            personalEmail: employeeData.personal_email || '',
-            companyEmail: employeeData.company_email || '',
-            preferredContactEmail: employeeData.prefered_contact_email || '',
-            currentAddress: employeeData.current_address || '',
-            currentAccommodationType: employeeData.current_accommodation_type || '',
-            permanentAddress: employeeData.permanent_address || '',
-            permanentAccommodationType: employeeData.permanent_accommodation_type || '',
-            personToBeContacted: employeeData.person_to_be_contacted || '',
-            emergencyPhoneNumber: employeeData.emergency_phone_number || '',
-            relation: employeeData.relation || ''
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Contact info stored successfully');
-        results.contact = true;
-      } catch (error) {
-        console.error('Error storing contact info:', error.message);
-      }
-    }
-
-    // 4. Store basic employment info
-    if (basicEmploymentAddress) {
-      try {
-        console.log(`Storing basic employment in contract: ${basicEmploymentAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-basic-employment`, {
-          privateKey: privateKey,
-          contractAddress: basicEmploymentAddress,
-          employeeId: employeeId,
-          basicEmployment: {
-            employeeNumber: employeeData.employee_number || '',
-            reportsTo: employeeData.reports_to || '',
-            branch: employeeData.branch || '',
-            noticeNumberOfDays: employeeData.notice_number_of_days || 0,
-            newWorkplace: employeeData.new_workplace || '',
-            leaveEncashed: employeeData.leave_encashed === "1" ? true : false
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Basic employment stored successfully');
-        results.employment = true;
-      } catch (error) {
-        console.error('Error storing basic employment:', error.message);
-      }
-    }
-
-    // 5. Store career info
-    if (careerAddress) {
-      try {
-        console.log(`Storing career info in contract: ${careerAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-career`, {
-          privateKey: privateKey,
-          contractAddress: careerAddress,
-          employeeId: employeeId,
-          career: {
-            reasonForLeaving: employeeData.reason_for_leaving || '',
-            feedback: employeeData.feedback || '',
-            employmentType: employeeData.employment_type || '',
-            grade: employeeData.grade || '',
-            jobApplicant: employeeData.job_applicant || '',
-            defaultShift: employeeData.default_shift || ''
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Career info stored successfully');
-        results.career = true;
-      } catch (error) {
-        console.error('Error storing career info:', error.message);
-      }
-    }
-
-    // 6. Store approval info
-    if (approvalAddress) {
-      try {
-        console.log(`Storing approval info in contract: ${approvalAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-approval`, {
-          privateKey: privateKey,
-          contractAddress: approvalAddress,
-          employeeId: employeeId,
-          approval: {
-            expenseApprover: employeeData.expense_approver || '',
-            leaveApprover: employeeData.leave_approver || '',
-            shiftRequestApprover: employeeData.shift_request_approver || '',
-            payrollCostCenter: employeeData.payroll_cost_center || '',
-            healthInsuranceProvider: employeeData.health_insurance_provider || '',
-            healthInsuranceNo: employeeData.health_insurance_no || ''
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Approval info stored successfully');
-        results.approval = true;
-      } catch (error) {
-        console.error('Error storing approval info:', error.message);
-      }
-    }
-
-    // 7. Store financial info
-    if (financialAddress) {
-      try {
-        console.log(`Storing financial info in contract: ${financialAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-financial`, {
-          privateKey: privateKey,
-          contractAddress: financialAddress,
-          employeeId: employeeId,
-          financial: {
-            salaryCurrency: employeeData.salary_currency || '',
-            salaryMode: employeeData.salary_mode || '',
-            bankName: employeeData.bank_name || '',
-            bankAccountNo: employeeData.bank_ac_no || '',
-            iban: employeeData.iban || ''
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Financial info stored successfully');
-        results.financial = true;
-      } catch (error) {
-        console.error('Error storing financial info:', error.message);
-      }
-    }
-
-    // 8. Store personal info
-    if (personalAddress) {
-      try {
-        console.log(`Storing personal info in contract: ${personalAddress}`);
-        await axios.post(`${apiBaseEndpoint}/api/v2/employee/store-personal`, {
-          privateKey: privateKey,
-          contractAddress: personalAddress,
-          employeeId: employeeId,
-          personal: {
-            maritalStatus: employeeData.marital_status || '',
-            familyBackground: employeeData.family_background || '',
-            bloodGroup: employeeData.blood_group || '',
-            healthDetails: employeeData.health_details || '',
-            passportNumber: employeeData.passport_number || '',
-            validUpto: employeeData.valid_upto || '',
-            dateOfIssue: employeeData.date_of_issue || '',
-            placeOfIssue: employeeData.place_of_issue || '',
-            bio: employeeData.bio || '',
-            attendanceDeviceId: employeeData.attendance_device_id || '',
-            holidayList: employeeData.holiday_list || ''
-          }
-        }, {
-          timeout: 15000
-        });
-        console.log('Personal info stored successfully');
-        results.personal = true;
-      } catch (error) {
-        console.error('Error storing personal info:', error.message);
-      }
-    }
-
-    // Register each contract in the registry if needed
-    if (registryAddress) {
-      try {
-        // Only register contracts that were successfully stored and have valid addresses
-        const contractsToRegister = [
-          { type: 0, address: basicInfoAddress, success: results.basicInfo },
-          { type: 1, address: datesAddress, success: results.dates },
-          { type: 2, address: contactInfoAddress, success: results.contact },
-          { type: 3, address: basicEmploymentAddress, success: results.employment },
-          { type: 4, address: careerAddress, success: results.career },
-          { type: 5, address: approvalAddress, success: results.approval },
-          { type: 6, address: financialAddress, success: results.financial },
-          { type: 7, address: personalAddress, success: results.personal }
-        ];
-
-        for (const contract of contractsToRegister) {
-          if (contract.success && contract.address) {
-            try {
-              await axios.post(`${apiBaseEndpoint}/api/v2/employee/register-contract-in-registry`, {
-                privateKey: privateKey,
-                registryAddress: registryAddress,
-                employeeId: employeeId,
-                contractType: contract.type,
-                contractAddress: contract.address
-              }, {
-                timeout: 15000
-              });
-              console.log(`Contract type ${contract.type} registered in registry`);
-            } catch (error) {
-              console.log(`Contract type ${contract.type} likely already registered or error: ${error.message}`);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error registering contracts in registry:', error.message);
-      }
-    }
-
-    // Return success if at least basic info and dates were stored
-    results.success = results.basicInfo || results.dates ||
-      results.contact || results.employment ||
-      results.career || results.approval ||
-      results.financial || results.personal;
-
-    return results;
-  } catch (error) {
-    console.error('Fatal error storing employee data in blockchain:', error.message);
-    if (error.response) {
-      console.error('API response error:', error.response.status, error.response.data);
-    }
-    return { success: false };
   }
-};
 
-// For storing attendance data in blockchain
-const storeAttendanceInBlockchain = async (attendanceData) => {
-  try {
-    // Check if required environment variables are set
-    if (!privateKey || !attendanceContractAddress) {
-      console.error('Missing PRIVATE_KEY or CONTRACT_ADDRESS_ATTENDANCE environment variables');
-      return false;
+  return formattedEvent;
+}
+
+// Function to display all data fields in a formatted way
+function formatAllDataFields(data, label = "Data") {
+  if (!data) return "No data";
+
+  const lines = [`\n📋 ${label}:`];
+
+  // Sort keys for consistent display
+  const sortedKeys = Object.keys(data).sort();
+
+  sortedKeys.forEach(key => {
+    const value = data[key];
+    let displayValue;
+
+    if (value === null) {
+      displayValue = "NULL";
+    } else if (value === undefined) {
+      displayValue = "UNDEFINED";
+    } else if (value === "") {
+      displayValue = "EMPTY STRING";
+    } else if (typeof value === 'string' && value.trim() === "") {
+      displayValue = "WHITESPACE ONLY";
+    } else {
+      displayValue = String(value);
     }
 
-    // Extract attendance fields safely
-    const id = attendanceData.name ?
-      parseInt(attendanceData.name.replace(/\D/g, ''), 10) ||
-      Math.floor(Math.random() * 1000000) :
-      Math.floor(Math.random() * 1000000);
+    lines.push(`   ${key}: ${displayValue}`);
+  });
 
-    const employeeName = attendanceData.employee_name || "";
-    const status = attendanceData.status || "";
-    const company = attendanceData.company || "";
+  return lines.join('\n');
+}
 
-    // Safely parse attendance date
-    let attendanceDate = 0;
-    if (attendanceData.attendance_date) {
-      try {
-        if (typeof attendanceData.attendance_date === 'number') {
-          attendanceDate = attendanceData.attendance_date;
-        } else {
-          const attDate = new Date(attendanceData.attendance_date);
-          if (!isNaN(attDate.getTime())) {
-            attendanceDate = Math.floor(attDate.getTime() / 1000);
-          }
-        }
-      } catch (error) {
-        console.error('Error parsing attendance date:', error.message);
-      }
+// Function to compare and show differences between two objects
+function showDataDifferences(beforeData, afterData) {
+  if (!beforeData || !afterData) return "";
+
+  const differences = [];
+  const allKeys = new Set([...Object.keys(beforeData), ...Object.keys(afterData)]);
+
+  allKeys.forEach(key => {
+    const beforeValue = beforeData[key];
+    const afterValue = afterData[key];
+
+    if (beforeValue !== afterValue) {
+      const formatValue = (val) => {
+        if (val === null) return "NULL";
+        if (val === undefined) return "UNDEFINED";
+        if (val === "") return "EMPTY STRING";
+        return String(val);
+      };
+
+      differences.push(`   ${key}: "${formatValue(beforeValue)}" → "${formatValue(afterValue)}"`);
     }
+  });
 
-    console.log(`Processing attendance data: ID=${id}, Employee=${employeeName}, Date=${attendanceDate}, Status=${status}`);
-
-    // Retry logic for blockchain API calls
-    let attempts = 0;
-    const maxAttempts = 3;
-
-    while (attempts < maxAttempts) {
-      try {
-        // Send to blockchain
-        const response = await axios.post(`${apiBaseEndpoint}/store-attendance`, {
-          privateKey: privateKey,
-          contractAddress: attendanceContractAddress,
-          id: id,
-          employeeName: employeeName,
-          attendanceDate: attendanceDate,
-          status: status,
-          company: company
-        }, {
-          timeout: 15000
-        });
-
-        console.log(`Stored attendance in blockchain, response:`, response.data);
-        return true;
-      } catch (error) {
-        attempts++;
-        console.error(`Attempt ${attempts}/${maxAttempts} failed:`, error.message);
-
-        if (attempts >= maxAttempts) {
-          throw error;
-        }
-
-        // Wait before retrying with exponential backoff
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempts));
-      }
-    }
-
-    return false;
-  } catch (error) {
-    console.error('Error storing attendance data in blockchain:', error.message);
-    if (error.response) {
-      console.error('API response error:', error.response.status, error.response.data);
-    }
-    return false;
-  }
-};
+  return differences.length > 0 ? `\n🔄 Field Changes:\n${differences.join('\n')}` : "\n🔄 No field changes detected";
+}
 
 // Function to check if Kafka topics exist
 async function checkTopics() {
@@ -523,101 +222,143 @@ async function checkTopics() {
     console.log('Connected to Kafka admin client');
 
     const topics = await admin.listTopics();
-    console.log('Available topics:', topics);
+    console.log('Available Kafka topics:', topics);
 
-    const userTopicExists = topics.includes(userTopic);
     const employeeTopicExists = topics.includes(employeeTopic);
-    const attendanceTopicExists = topics.includes(attendanceTopic);
+    const userTopicExists = topics.includes(userTopic);
 
-    console.log(`Topic '${userTopic}' exists: ${userTopicExists}`);
-    console.log(`Topic '${employeeTopic}' exists: ${employeeTopicExists}`);
-    console.log(`Topic '${attendanceTopic}' exists: ${attendanceTopicExists}`);
+    console.log(`\nTarget Topics Status:`);
+    console.log(`- ${employeeTopic}: ${employeeTopicExists ? '✓ EXISTS' : '✗ NOT FOUND'}`);
+    console.log(`- ${userTopic}: ${userTopicExists ? '✓ EXISTS' : '✗ NOT FOUND'}`);
 
     await admin.disconnect();
-    return { userTopicExists, employeeTopicExists, attendanceTopicExists };
+    return { employeeTopicExists, userTopicExists };
   } catch (error) {
     console.error('Error checking topics:', error.message);
-    return { userTopicExists: false, employeeTopicExists: false, attendanceTopicExists: false };
+    return { employeeTopicExists: false, userTopicExists: false };
   }
 }
 
-// Process message based on topic
-const processMessage = async (topic, message) => {
+// Process CDC message
+const processCDCMessage = async (topic, message) => {
   try {
-    // Create a unique ID for this record
-    const recordId = createRecordId(topic, message.offset);
+    // Parse message value
+    const messageValue = message.value.toString();
+    console.log(`\n🔍 Raw message length: ${messageValue.length} characters`);
 
-    // Skip if already processed
-    if (processedRecords.has(recordId)) {
-      console.log(`Record ${recordId} already processed, skipping`);
+    let event;
+    try {
+      event = JSON.parse(messageValue);
+    } catch (parseError) {
+      console.error('❌ Failed to parse JSON message:', parseError.message);
+      console.log('Raw message content:', messageValue.substring(0, 500) + '...');
       return;
     }
 
-    // Parse message value
-    const messageValue = message.value.toString();
-    const event = JSON.parse(messageValue);
+    // Debug: Show event structure
+    console.log('🔍 Event keys:', Object.keys(event));
+    console.log('🔍 Event structure preview:', JSON.stringify(event, null, 2).substring(0, 300) + '...');
 
-    // Log the received event
-    console.log('\n----- CDC Event Received -----');
-    console.log(`Topic: ${topic}`);
-    console.log(`Offset: ${message.offset}`);
-    console.log(`RecordID: ${recordId}`);
-    console.log(`Timestamp: ${new Date(parseInt(message.timestamp)).toISOString()}`);
+    // Format the event for display
+    const formattedEvent = formatCDCEvent(topic, message, event);
 
-    // Log the event details
-    if (event.op) {
-      console.log(`Operation: ${event.op}`); // c=create, u=update, d=delete
+    // Display the CDC event header
+    console.log('\n' + '='.repeat(100));
+    console.log('📊 CDC EVENT DETECTED');
+    console.log('='.repeat(100));
+    console.log(`🕒 Timestamp: ${formattedEvent.timestamp}`);
+    console.log(`📋 Table: ${formattedEvent.tableName}`);
+    console.log(`🗃️  Database: ${formattedEvent.database}`);
+    console.log(`⚡ Operation: ${formattedEvent.operation}`);
+    console.log(`📍 Topic: ${topic}`);
+    console.log(`🔢 Offset: ${formattedEvent.offset} | Partition: ${formattedEvent.partition || 'N/A'}`);
+    console.log(`🔍 Detected Operation: ${formattedEvent.detectedOperation} → ${formattedEvent.operation}`);
+
+    // Show what data we found
+    const hasData = formattedEvent.data;
+    const hasBefore = formattedEvent.dataBefore;
+    const hasAfter = formattedEvent.dataAfter;
+    const hasDeleted = formattedEvent.deletedData;
+
+    console.log(`\n🔍 Data Analysis:`);
+    console.log(`   Has data: ${hasData ? '✓' : '✗'}`);
+    console.log(`   Has before: ${hasBefore ? '✓' : '✗'}`);
+    console.log(`   Has after: ${hasAfter ? '✓' : '✗'}`);
+    console.log(`   Has deleted: ${hasDeleted ? '✓' : '✗'}`);
+
+    // Show record metadata if available
+    if (formattedEvent.data) {
+      console.log(`\n📊 Record Metadata:`);
+      if (formattedEvent.data.name) console.log(`   Record ID: ${formattedEvent.data.name}`);
+      if (formattedEvent.data.creation) {
+        const creationDate = new Date(formattedEvent.data.creation / 1000).toISOString();
+        console.log(`   Created: ${creationDate}`);
+      }
+      if (formattedEvent.data.modified) {
+        const modifiedDate = new Date(formattedEvent.data.modified / 1000).toISOString();
+        console.log(`   Modified: ${modifiedDate}`);
+      }
+      if (formattedEvent.data.modified_by) console.log(`   Modified by: ${formattedEvent.data.modified_by}`);
+    }
+    // Display all data based on operation type
+    if (formattedEvent.operation === 'CREATE' || formattedEvent.operation === 'READ (Snapshot)') {
+      if (formattedEvent.data) {
+        console.log(formatAllDataFields(formattedEvent.data, "Record Data"));
+      } else {
+        console.log('\n⚠️  No data found for CREATE/READ operation');
+      }
+
+    } else if (formattedEvent.operation === 'UPDATE') {
+      if (formattedEvent.dataAfter) {
+        console.log(formatAllDataFields(formattedEvent.dataAfter, "Current Record Data (After Update)"));
+        console.log('\n💡 Note: ERPNext CDC format does not provide "before" data for updates');
+        console.log('    The data shown represents the current state after the change');
+      } else if (formattedEvent.data) {
+        console.log(formatAllDataFields(formattedEvent.data, "Current Record Data"));
+      } else {
+        console.log('\n⚠️  No data found for UPDATE operation');
+      }
+
+    } else if (formattedEvent.operation === 'DELETE') {
+      if (formattedEvent.deletedData) {
+        console.log(formatAllDataFields(formattedEvent.deletedData, "Deleted Record Data"));
+      } else {
+        console.log('\n⚠️  No deleted data found for DELETE operation');
+      }
+    } else {
+      // Fallback for any unrecognized operations
+      console.log('\n⚠️  Unrecognized operation - showing all available data:');
+      if (formattedEvent.data) {
+        console.log(formatAllDataFields(formattedEvent.data, "Available Data"));
+      } else {
+        console.log('\n🔍 Raw Event Data:');
+        console.log(JSON.stringify(event, null, 2));
+      }
     }
 
-    // Different processing based on topic
-    if (topic === employeeTopic) {
-      console.log('Employee data detected - processing...');
-      const employeeData = event.after || event;
-
-      // Skip if the record is marked as deleted
-      if (employeeData.__deleted === "true") {
-        console.log('Employee record marked as deleted, skipping blockchain storage');
-        processedRecords.add(recordId);
-        await saveProcessedRecords();
-        return;
-      }
-
-      // Store employee data in blockchain directly using individual contracts
-      const result = await storeEmployeeDataIndividually(employeeData);
-
-      if (result.success) {
-        // Mark as processed if successful
-        processedRecords.add(recordId);
-        await saveProcessedRecords();
-      }
+    // Always show raw event structure if debug mode is enabled
+    if (process.env.DEBUG_RAW_EVENT === 'true') {
+      console.log('\n🔍 Complete Raw CDC Event:');
+      console.log(JSON.stringify(event, null, 2));
     }
-    else if (topic === attendanceTopic) {
-      console.log('Attendance data detected - processing...');
-      const attendanceData = event.after || event;
 
-      // Skip if the record is marked as deleted
-      if (attendanceData.__deleted === "true") {
-        console.log('Attendance record marked as deleted, skipping blockchain storage');
-        processedRecords.add(recordId);
-        await saveProcessedRecords();
-        return;
-      }
+    console.log('='.repeat(100));
 
-      // Store attendance data in blockchain
-      const success = await storeAttendanceInBlockchain(attendanceData);
+    // Save to log file with all data
+    await saveCDCEventLog({
+      ...formattedEvent,
+      allData: {
+        before: formattedEvent.dataBefore,
+        after: formattedEvent.dataAfter || formattedEvent.data,
+        deleted: formattedEvent.deletedData
+      },
+      rawEventStructure: Object.keys(event)
+    });
 
-      if (success) {
-        // Mark as processed if successful
-        processedRecords.add(recordId);
-        await saveProcessedRecords();
-      }
-    }
-    // User topic processing is removed to focus on employee and attendance
-
-    console.log('----- End of CDC Event -----\n');
   } catch (error) {
-    console.error('Error processing message:', error);
-    console.error('Message content:', message.value.toString());
+    console.error('❌ Error processing CDC message:', error);
+    console.error('Raw message content:', message.value.toString().substring(0, 1000));
+    console.error('Stack trace:', error.stack);
   }
 };
 
@@ -627,54 +368,87 @@ async function run() {
   let retries = 0;
   const maxRetries = 15;
 
-  // Load previously processed records
+  // Load previous events log
   await loadProcessedRecords();
+
+  console.log(`
+🚀 Starting ERPNext CDC Event Tracker
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📡 Kafka Broker: ${kafkaBroker}
+🎯 Target Tables: Employee, User  
+📊 Database: _0775ec53bab106f5
+⚡ Mode: LIVE tracking (new changes only)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`);
 
   while (!connected && retries < maxRetries) {
     try {
-      console.log(`Starting consumer with broker: ${kafkaBroker} (attempt ${retries + 1}/${maxRetries})`);
+      console.log(`🔄 Connecting to Kafka... (attempt ${retries + 1}/${maxRetries})`);
 
       // Connect to Kafka
       await consumer.connect();
-      console.log('Connected to Kafka');
+      console.log('✅ Connected to Kafka successfully');
       connected = true;
 
       // Check if topics exist
-      const { userTopicExists, employeeTopicExists, attendanceTopicExists } = await checkTopics();
+      const { employeeTopicExists, userTopicExists } = await checkTopics();
 
       // Subscribe to topics that exist
-      // We'll prioritize employee and attendance topics
+      const topicsToSubscribe = [];
+
       if (employeeTopicExists) {
-        await consumer.subscribe({ topic: employeeTopic, fromBeginning: true });
-        console.log(`Subscribed to topic: ${employeeTopic}`);
+        topicsToSubscribe.push(employeeTopic);
+      } else {
+        console.log(`⚠️  Warning: Employee topic ${employeeTopic} not found`);
       }
 
-      if (attendanceTopicExists) {
-        await consumer.subscribe({ topic: attendanceTopic, fromBeginning: true });
-        console.log(`Subscribed to topic: ${attendanceTopic}`);
+      if (userTopicExists) {
+        topicsToSubscribe.push(userTopic);
+      } else {
+        console.log(`⚠️  Warning: User topic ${userTopic} not found`);
       }
 
-      // Consume messages
-      await consumer.run({
-        eachMessage: async ({ topic, partition, message }) => {
-          await processMessage(topic, message);
-        },
-      });
-
-      console.log('Consumer started and waiting for messages...');
-
-    } catch (error) {
-      retries++;
-      console.error(`Connection attempt ${retries} failed:`, error.message);
-
-      if (retries >= maxRetries) {
-        console.error('Maximum retries reached. Exiting.');
+      if (topicsToSubscribe.length === 0) {
+        console.log('❌ No target topics found. Make sure Debezium connector is registered and tables have data.');
+        console.log('💡 Try running the register-connector.js script first.');
         process.exit(1);
       }
 
-      // Exponential backoff for retries
+      // Subscribe to available topics - Start from LATEST, not beginning
+      for (const topic of topicsToSubscribe) {
+        await consumer.subscribe({ topic, fromBeginning: false }); // Changed to false
+        console.log(`📌 Subscribed to: ${topic} (latest messages only)`);
+      }
+
+      // Start consuming messages
+      await consumer.run({
+        eachMessage: async ({ topic, partition, message }) => {
+          await processCDCMessage(topic, message);
+        },
+      });
+
+      console.log('\n🎧 CDC Event Tracker is now listening for NEW changes only...');
+      console.log('💡 Make changes to Employee or User data in ERPNext to see LIVE CDC events');
+      console.log('📋 ALL data fields will be displayed (including NULL values)');
+      console.log('🔧 Set DEBUG_RAW_EVENT=true to see raw CDC event structure');
+      console.log('⚡ Only NEW changes from this point forward will be shown');
+      console.log('🛑 Press Ctrl+C to stop\n');
+
+    } catch (error) {
+      retries++;
+      console.error(`❌ Connection attempt ${retries} failed:`, error.message);
+
+      if (retries >= maxRetries) {
+        console.error('💥 Maximum retries reached. Exiting.');
+        console.log('\n🔧 Troubleshooting steps:');
+        console.log('1. Make sure Kafka is running on', kafkaBroker);
+        console.log('2. Verify Debezium connector is registered');
+        console.log('3. Check that ERPNext database is accessible');
+        process.exit(1);
+      }
+
       const backoffTime = Math.min(10000, 1000 * Math.pow(2, retries));
-      console.log(`Waiting ${backoffTime / 1000} seconds before retrying...`);
+      console.log(`⏳ Waiting ${backoffTime / 1000} seconds before retrying...`);
       await new Promise(resolve => setTimeout(resolve, backoffTime));
     }
   }
@@ -683,41 +457,52 @@ async function run() {
 // Start the consumer with auto-restart
 function startWithAutoRestart() {
   run().catch(error => {
-    console.error('Fatal error in consumer:', error);
-    console.log('Restarting consumer in 10 seconds...');
+    console.error('💥 Fatal error in CDC tracker:', error);
+    console.log('🔄 Restarting in 10 seconds...');
     setTimeout(startWithAutoRestart, 10000);
   });
 }
 
-// Display startup information
-console.log('Starting ERP-Blockchain Consumer Service...');
-console.log(`Using Kafka broker: ${kafkaBroker}`);
-console.log(`API endpoint: ${apiBaseEndpoint}`);
-console.log(`Registry contract: ${registryAddress || 'Not set'}`);
-console.log(`Basic info contract: ${basicInfoAddress || 'Not set'}`);
-console.log(`Dates contract: ${datesAddress || 'Not set'}`);
-console.log(`Attendance contract: ${attendanceContractAddress || 'Not set'}`);
+// Display summary statistics
+function displaySummary() {
+  console.log(`\n📈 CDC Events Summary: ${processedRecords.length} events tracked`);
+
+  if (processedRecords.length > 0) {
+    const operations = processedRecords.reduce((acc, event) => {
+      acc[event.operation] = (acc[event.operation] || 0) + 1;
+      return acc;
+    }, {});
+
+    console.log('📊 Operations breakdown:');
+    Object.entries(operations).forEach(([op, count]) => {
+      console.log(`   ${op}: ${count}`);
+    });
+  }
+}
 
 // Initial start
 startWithAutoRestart();
 
 // Handle termination signals
 process.on('SIGINT', async () => {
-  console.log('Disconnecting consumer...');
+  console.log('\n🛑 Shutting down CDC tracker...');
+  displaySummary();
   try {
     await consumer.disconnect();
+    console.log('✅ Disconnected from Kafka');
   } catch (e) {
-    console.error('Error during disconnect:', e);
+    console.error('❌ Error during disconnect:', e);
   }
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('Disconnecting consumer...');
+  console.log('\n🛑 Shutting down CDC tracker...');
+  displaySummary();
   try {
     await consumer.disconnect();
   } catch (e) {
-    console.error('Error during disconnect:', e);
+    console.error('❌ Error during disconnect:', e);
   }
   process.exit(0);
 });
