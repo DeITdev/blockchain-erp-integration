@@ -8,3 +8,4 @@ node_modules
 package-lock.json
 auth.txt
 cdc_events_log.json
+.idea
