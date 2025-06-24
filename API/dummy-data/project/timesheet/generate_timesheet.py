@@ -273,38 +273,78 @@ class TimesheetGenerator:
             return from_time_str
 
     def generate_random_hours(self) -> float:
-        """Generate random working hours (0.5 to 8.0 hours)"""
-        hours_options = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5,
-                         4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0]
+        """Generate random working hours (0.5 to 4.0 hours to avoid long overlaps)"""
+        hours_options = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
         return random.choice(hours_options)
 
-    def generate_timesheet_details(self, project_list: List[Dict]) -> List[Dict]:
-        """Generate timesheet detail rows"""
-        # Random number of rows (1-5 activities per timesheet)
-        num_rows = random.randint(1, 5)
+    def generate_timesheet_details(self, project_list: List[Dict], employee_name: str) -> List[Dict]:
+        """Generate timesheet detail rows without overlapping times"""
+        # Random number of rows (1-3 activities per timesheet to avoid overlaps)
+        num_rows = random.randint(1, 3)
         timesheet_details = []
 
+        # Generate a base date for this timesheet (within last 30 days)
+        base_date = datetime.now() - timedelta(days=random.randint(1, 30))
+
+        # Start times to track and avoid overlaps
+        used_times = []
+
         for i in range(num_rows):
-            from_time = self.generate_random_time()
-            hours = self.generate_random_hours()
-            to_time = self.generate_to_time(from_time, hours)
+            # Generate non-overlapping times
+            attempts = 0
+            max_attempts = 10
 
-            detail = {
-                "from_time": from_time,
-                "to_time": to_time,
-                "hours": hours,
-                # Random billable/non-billable
-                "is_billable": random.choice([0, 1]),
-                # Random project
-                "project": random.choice(project_list)["name"]
-            }
+            while attempts < max_attempts:
+                # Generate work hours (8 AM to 4 PM to leave room for duration)
+                hour = random.randint(8, 16)
+                minute = random.choice([0, 30])  # Only half-hour intervals
 
-            # Add activity type if available
-            if self.activity_types:
-                activity = random.choice(self.activity_types)
-                detail["activity_type"] = activity.get("name")
+                # Create from_time
+                from_time_obj = base_date.replace(
+                    hour=hour, minute=minute, second=0, microsecond=0)
 
-            timesheet_details.append(detail)
+                # Generate duration (0.5 to 4.0 hours)
+                hours = random.choice([0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
+
+                # Calculate to_time
+                to_time_obj = from_time_obj + timedelta(hours=hours)
+
+                # Check for overlaps with existing times
+                overlap_found = False
+                for existing_from, existing_to in used_times:
+                    if (from_time_obj < existing_to and to_time_obj > existing_from):
+                        overlap_found = True
+                        break
+
+                if not overlap_found:
+                    # No overlap found, use this time slot
+                    used_times.append((from_time_obj, to_time_obj))
+
+                    detail = {
+                        "from_time": from_time_obj.strftime("%Y-%m-%d %H:%M:%S"),
+                        "to_time": to_time_obj.strftime("%Y-%m-%d %H:%M:%S"),
+                        "hours": hours,
+                        "is_billable": random.choice([0, 1]),
+                        "project": random.choice(project_list)["name"]
+                    }
+
+                    # Add activity type if available
+                    if self.activity_types:
+                        activity = random.choice(self.activity_types)
+                        detail["activity_type"] = activity.get("name")
+
+                    timesheet_details.append(detail)
+                    break
+
+                attempts += 1
+
+            if attempts >= max_attempts:
+                logger.warning(
+                    f"Could not generate non-overlapping time for row {i+1}, skipping")
+                break
+
+        # Sort timesheet details by from_time to ensure chronological order
+        timesheet_details.sort(key=lambda x: x["from_time"])
 
         return timesheet_details
 
@@ -376,9 +416,9 @@ class TimesheetGenerator:
                 project = self.projects[i] if i < len(
                     self.projects) else random.choice(self.projects)
 
-                # Generate timesheet details (table rows)
+                # Generate timesheet details (table rows) - pass employee for overlap checking
                 timesheet_details = self.generate_timesheet_details(
-                    self.projects)
+                    self.projects, employee["name"])
 
                 # Create timesheet data
                 timesheet_data = {
