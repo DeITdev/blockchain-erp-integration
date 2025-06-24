@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-ERPNext Employee Generator with Master Data
+ERPNext Employee Generator with Master Data (Fixed for Attendance Dates)
 Generates 50 employees using existing Branch, Employee Grade, Department, etc.
+FIXED: Ensures joining dates are before June 2025 to allow attendance creation.
 Uses environment variables from .env file for configuration.
 Author: ERPNext Employee Generator
-Version: 2.0.0
+Version: 2.1.0 (Fixed for Attendance)
 """
 
 import requests
@@ -57,11 +58,15 @@ COMPANY_ABBR = os.getenv("COMPANY_ABBR")
 # Employee Configuration
 TARGET_EMPLOYEES = 50
 
-# Date ranges
+# Date ranges - FIXED FOR ATTENDANCE COMPATIBILITY
 BIRTH_YEAR_START = 1990
 BIRTH_YEAR_END = 2005
+# CRITICAL FIX: All employees must join before June 2025 for attendance to work
 JOIN_YEAR_START = 2020
-JOIN_YEAR_END = 2025
+JOIN_YEAR_END = 2024  # Changed from 2025 to 2024
+# Alternative: Join early 2025 but definitely before June
+JOIN_EARLY_2025_START = datetime(2024, 6, 1)  # Start from mid-2024
+JOIN_EARLY_2025_END = datetime(2025, 5, 31)   # End before June 2025
 
 # Retry settings
 RETRY_ATTEMPTS = 3
@@ -332,6 +337,25 @@ class EmployeeGenerator:
 
         return random_date.strftime("%Y-%m-%d")
 
+    def generate_early_joining_date(self) -> str:
+        """
+        Generate joining date that's definitely before June 2025
+        This ensures attendance can be created for June 2025 onwards
+        """
+        # Calculate days between start and end dates
+        days_between = (JOIN_EARLY_2025_END - JOIN_EARLY_2025_START).days
+        random_days = random.randint(0, days_between)
+        random_date = JOIN_EARLY_2025_START + timedelta(days=random_days)
+
+        # Double-check: ensure date is before June 2025
+        june_2025 = datetime(2025, 6, 1)
+        if random_date >= june_2025:
+            # Force date to be in early 2025
+            random_date = datetime(
+                2025, random.randint(1, 5), random.randint(1, 28))
+
+        return random_date.strftime("%Y-%m-%d")
+
     def generate_phone_number(self) -> str:
         """Generate valid Indonesian phone number"""
         return f"+628{random.randint(100_000_000, 9_999_999_999):010d}"
@@ -391,6 +415,8 @@ class EmployeeGenerator:
     def create_employees(self):
         """Create employee records with master data"""
         logger.info("🚀 Starting employee creation with master data...")
+        logger.info(
+            "🎯 FIXED: All joining dates will be before June 2025 for attendance compatibility")
 
         # Check how many employees we need to create
         employees_to_create = self.check_existing_employees()
@@ -412,7 +438,10 @@ class EmployeeGenerator:
             employees_to_create = len(available_users)
 
         print("\n" + "="*60)
-        print("👥 Creating Employees with Master Data")
+        print("👥 Creating Employees with Master Data (ATTENDANCE COMPATIBLE)")
+        print("="*60)
+        print("🎯 All joining dates will be before June 2025")
+        print("✅ This ensures attendance can be created for June 2025 onwards")
         print("="*60)
 
         employees_created_count = 0
@@ -434,8 +463,19 @@ class EmployeeGenerator:
             gender = random.choice(["Male", "Female"])
             date_of_birth = self.generate_random_date_in_range(
                 BIRTH_YEAR_START, BIRTH_YEAR_END)
-            date_of_joining = self.generate_random_date_in_range(
-                JOIN_YEAR_START, JOIN_YEAR_END)
+
+            # CRITICAL FIX: Use the new method to ensure early joining dates
+            date_of_joining = self.generate_early_joining_date()
+
+            # Verify the joining date is indeed before June 2025
+            join_date_obj = datetime.strptime(date_of_joining, "%Y-%m-%d")
+            june_2025 = datetime(2025, 6, 1)
+            if join_date_obj >= june_2025:
+                logger.warning(
+                    f"⚠️ Generated join date {date_of_joining} is not before June 2025, fixing...")
+                # Force to early 2025
+                date_of_joining = f"2025-{random.randint(1, 5):02d}-{random.randint(1, 28):02d}"
+                logger.info(f"✅ Fixed join date to: {date_of_joining}")
 
             # Check if employee already exists
             if self.api.check_exists("Employee", employee_name):
@@ -508,14 +548,23 @@ class EmployeeGenerator:
                 print(f"   👤 User: {user['name']}")
                 print(f"   📧 Email: {email}")
                 print(f"   🎂 Birth: {date_of_birth}")
-                print(f"   📅 Join: {date_of_joining}")
+                print(f"   📅 Join: {date_of_joining} ✅ (Before June 2025)")
 
                 # Show assigned master data
                 print(f"   📊 Master Data:")
                 for field, status in master_data_status.items():
                     if status == "✅":
+                        field_key = field.lower().replace(" ", "_")
+                        # Map field names to actual data keys
+                        field_mapping = {
+                            "employment_type": "employment_type",
+                            "grade": "grade",
+                            "branch": "branch",
+                            "department": "department",
+                            "designation": "designation"
+                        }
                         field_value = employee_data.get(
-                            field.lower().replace(" ", "_"), "N/A")
+                            field_mapping.get(field_key, field_key), "N/A")
                         print(f"      {status} {field}: {field_value}")
                     else:
                         print(f"      {status} {field}: Not available")
@@ -538,6 +587,8 @@ class EmployeeGenerator:
         print("="*60)
         print(
             f"✅ Employees Created: {employees_created_count}/{employees_to_create}")
+        print(f"🎯 All joining dates are before June 2025 ✅")
+        print(f"📅 This allows attendance creation for June 2025 onwards")
         print(f"📊 Master Data Used:")
         print(f"   🏢 Branches: {len(self.master_data['branches'])}")
         print(
@@ -549,17 +600,22 @@ class EmployeeGenerator:
 
         logger.info(
             f"Successfully created {employees_created_count} employees with master data")
+        logger.info(
+            "🎯 All employees have joining dates before June 2025 - attendance creation will work!")
 
     def run(self):
         """Main execution method"""
         print("=" * 80)
-        print("👥 ERPNext Employee Generator with Master Data")
+        print("👥 ERPNext Employee Generator with Master Data (ATTENDANCE FIXED)")
         print("=" * 80)
         print(f"📡 API Endpoint: {BASE_URL}")
         print(f"🏢 Company: {COMPANY_NAME}")
         print(f"🎯 Target Employees: {TARGET_EMPLOYEES}")
         print(f"📅 Birth Year Range: {BIRTH_YEAR_START} - {BIRTH_YEAR_END}")
-        print(f"📅 Join Year Range: {JOIN_YEAR_START} - {JOIN_YEAR_END}")
+        print(
+            f"📅 Join Date Range: {JOIN_EARLY_2025_START.strftime('%Y-%m-%d')} to {JOIN_EARLY_2025_END.strftime('%Y-%m-%d')}")
+        print("🎯 FIXED: All joining dates will be before June 2025")
+        print("✅ This ensures attendance can be created without validation errors")
         print("=" * 80)
 
         try:
@@ -572,6 +628,8 @@ class EmployeeGenerator:
             self.create_employees()
 
             print(f"\n🎉 EMPLOYEE GENERATION COMPLETED!")
+            print("✅ All employees now have joining dates before June 2025")
+            print("📅 Attendance creation for June 2025 should work without errors")
 
         except Exception as e:
             logger.error(f"Fatal error during employee generation: {str(e)}")
@@ -580,12 +638,16 @@ class EmployeeGenerator:
 
 def main():
     """Main entry point"""
-    print("🚀 Starting ERPNext Employee Generation with Master Data...")
+    print("🚀 Starting ERPNext Employee Generation with Master Data (ATTENDANCE FIXED)...")
 
     # Check if API credentials are set
     if not API_KEY or not API_SECRET:
         print("❌ Error: API_KEY and API_SECRET must be set in .env file")
         return
+
+    print(f"\n🎯 This script fixes the attendance date validation error!")
+    print(f"✅ All employees will have joining dates before June 2025")
+    print(f"📅 This allows attendance creation for June 2025 onwards")
 
     response = input(
         f"\nThis will create up to {TARGET_EMPLOYEES} employees using existing master data. Continue? (yes/no): ")
