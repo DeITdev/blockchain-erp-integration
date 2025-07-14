@@ -1,4 +1,4 @@
-// Load environment variables if .env file exists, but don't fail if it doesn't
+// Load environment variables from consumer folder
 try {
   require('dotenv').config();
 } catch (error) {
@@ -13,8 +13,8 @@ const path = require('path');
 const kafkaBroker = process.env.KAFKA_BROKER || 'localhost:29092';
 
 // Create a processed records tracker for debugging (optional)
-// const PROCESSED_RECORDS_FILE = path.join(__dirname, 'cdc_events_log.json');
-// let processedRecords = [];
+const PROCESSED_RECORDS_FILE = path.join(__dirname, 'cdc_events_log.json');
+let processedRecords = [];
 
 // Load previously processed records for reference
 async function loadProcessedRecords() {
@@ -45,7 +45,7 @@ async function saveCDCEventLog(eventData) {
 // Configure Kafka client
 const kafka = new Kafka({
   brokers: [kafkaBroker],
-  clientId: 'erpnext-cdc-tracker',
+  clientId: 'erpnext-cdc-display-tracker',
   retry: {
     initialRetryTime: 5000,
     retries: 15
@@ -54,7 +54,7 @@ const kafka = new Kafka({
 
 // Create consumer instance
 const consumer = kafka.consumer({
-  groupId: 'erpnext-cdc-tracking-group',
+  groupId: 'erpnext-cdc-display-group',
   sessionTimeout: 60000,
   heartbeatInterval: 10000,
   retry: {
@@ -63,9 +63,35 @@ const consumer = kafka.consumer({
   }
 });
 
-// Topics to listen for (based on the new ERPNext database)
-const employeeTopic = 'erpnext._0775ec53bab106f5.tabEmployee';
-const userTopic = 'erpnext._0775ec53bab106f5.tabUser';
+// Function to dynamically find ERPNext topics
+function findERPNextTopics(allTopics) {
+  const erpnextTopics = allTopics.filter(topic =>
+    topic.startsWith('erpnext.') &&
+    topic.includes('.tab') &&
+    !topic.includes('schema-changes')
+  );
+
+  // Group topics by database hash
+  const topicsByDatabase = {};
+  erpnextTopics.forEach(topic => {
+    const parts = topic.split('.');
+    if (parts.length >= 3) {
+      const database = parts[1]; // The hash part
+      const tableName = parts[2]; // The table name
+
+      if (!topicsByDatabase[database]) {
+        topicsByDatabase[database] = [];
+      }
+      topicsByDatabase[database].push({ topic, tableName });
+    }
+  });
+
+  return topicsByDatabase;
+}
+
+// Target table names from environment variable
+const targetTableNames = process.env.TARGET_TABLES ? process.env.TARGET_TABLES.split(',') : ['tabEmployee', 'tabUser'];
+let topicMapping = {}; // Store topic mappings dynamically
 
 // Function to detect operation type from ERPNext CDC events
 function detectOperationType(event) {
@@ -82,14 +108,12 @@ function detectOperationType(event) {
   }
 
   // Check if this looks like a snapshot/initial read
-  // Usually these have creation timestamps but no clear operation indicator
   if (event.creation && !event.modified) {
     return 'r'; // READ (snapshot)
   }
 
   // If we have both creation and modified timestamps, check which is more recent
   if (event.creation && event.modified) {
-    // Convert timestamps if they're in microseconds (ERPNext format)
     const creationTime = typeof event.creation === 'number' ? event.creation : Date.parse(event.creation);
     const modifiedTime = typeof event.modified === 'number' ? event.modified : Date.parse(event.modified);
 
@@ -106,8 +130,6 @@ function detectOperationType(event) {
 // Function to format and display CDC event data
 function formatCDCEvent(topic, message, event) {
   const timestamp = new Date(parseInt(message.timestamp)).toISOString();
-
-  // Detect operation type for ERPNext events
   const operation = detectOperationType(event);
 
   const operationMap = {
@@ -130,24 +152,18 @@ function formatCDCEvent(topic, message, event) {
     tableName: topic.split('.').pop(),
     database: topic.split('.')[1],
     rawEvent: event,
-    detectedOperation: operation // Keep the detected operation for debugging
+    detectedOperation: operation
   };
 
-  // For ERPNext format, the event itself IS the data
-  // Remove special Debezium/ERPNext fields to get clean record data
+  // Clean data by removing special ERPNext/Debezium fields
   const specialFields = ['__deleted', '_assign', '_comments', '_liked_by', '_user_tags'];
   const cleanData = { ...event };
   specialFields.forEach(field => delete cleanData[field]);
 
   if (operation === 'd') {
-    // For deletes, the data represents what was deleted
     formattedEvent.deletedData = cleanData;
   } else {
-    // For creates, updates, reads - this is the current/new data
     formattedEvent.data = cleanData;
-
-    // For updates, we don't have "before" data in this format
-    // The entire event represents the current state after the change
     if (operation === 'u') {
       formattedEvent.dataAfter = cleanData;
       formattedEvent.dataBefore = null; // Not available in this CDC format
@@ -161,9 +177,7 @@ function formatCDCEvent(topic, message, event) {
 function formatAllDataFields(data, label = "Data") {
   if (!data) return "No data";
 
-  const lines = [`\n📋 ${label}:`];
-
-  // Sort keys for consistent display
+  const lines = [`\n${label}:`];
   const sortedKeys = Object.keys(data).sort();
 
   sortedKeys.forEach(key => {
@@ -188,33 +202,7 @@ function formatAllDataFields(data, label = "Data") {
   return lines.join('\n');
 }
 
-// Function to compare and show differences between two objects
-function showDataDifferences(beforeData, afterData) {
-  if (!beforeData || !afterData) return "";
-
-  const differences = [];
-  const allKeys = new Set([...Object.keys(beforeData), ...Object.keys(afterData)]);
-
-  allKeys.forEach(key => {
-    const beforeValue = beforeData[key];
-    const afterValue = afterData[key];
-
-    if (beforeValue !== afterValue) {
-      const formatValue = (val) => {
-        if (val === null) return "NULL";
-        if (val === undefined) return "UNDEFINED";
-        if (val === "") return "EMPTY STRING";
-        return String(val);
-      };
-
-      differences.push(`   ${key}: "${formatValue(beforeValue)}" → "${formatValue(afterValue)}"`);
-    }
-  });
-
-  return differences.length > 0 ? `\n🔄 Field Changes:\n${differences.join('\n')}` : "\n🔄 No field changes detected";
-}
-
-// Function to check if Kafka topics exist
+// Function to check if Kafka topics exist and find ERPNext topics dynamically
 async function checkTopics() {
   try {
     const admin = kafka.admin();
@@ -224,12 +212,39 @@ async function checkTopics() {
     const topics = await admin.listTopics();
     console.log('Available Kafka topics:', topics);
 
-    const employeeTopicExists = topics.includes(employeeTopic);
-    const userTopicExists = topics.includes(userTopic);
+    // Find ERPNext topics dynamically
+    const topicsByDatabase = findERPNextTopics(topics);
+
+    console.log(`\nFound ERPNext databases:`);
+    Object.keys(topicsByDatabase).forEach(db => {
+      console.log(`   Database: ${db}`);
+      topicsByDatabase[db].forEach(({ topic, tableName }) => {
+        console.log(`     - ${tableName}: ${topic}`);
+      });
+    });
+
+    // Find our target topics
+    let employeeTopicExists = false;
+    let userTopicExists = false;
+
+    Object.values(topicsByDatabase).forEach(topics => {
+      topics.forEach(({ topic, tableName }) => {
+        if (tableName === 'tabEmployee') {
+          employeeTopic = topic;
+          employeeTopicExists = true;
+        } else if (tableName === 'tabUser') {
+          userTopic = topic;
+          userTopicExists = true;
+        }
+      });
+    });
 
     console.log(`\nTarget Topics Status:`);
-    console.log(`- ${employeeTopic}: ${employeeTopicExists ? '✓ EXISTS' : '✗ NOT FOUND'}`);
-    console.log(`- ${userTopic}: ${userTopicExists ? '✓ EXISTS' : '✗ NOT FOUND'}`);
+    console.log(`- Employee (tabEmployee): ${employeeTopicExists ? 'EXISTS' : 'NOT FOUND'}`);
+    if (employeeTopicExists) console.log(`  Topic: ${employeeTopic}`);
+
+    console.log(`- User (tabUser): ${userTopicExists ? 'EXISTS' : 'NOT FOUND'}`);
+    if (userTopicExists) console.log(`  Topic: ${userTopic}`);
 
     await admin.disconnect();
     return { employeeTopicExists, userTopicExists };
@@ -239,56 +254,37 @@ async function checkTopics() {
   }
 }
 
-// Process CDC message
+// Process CDC message - Display Only
 const processCDCMessage = async (topic, message) => {
   try {
-    // Parse message value
     const messageValue = message.value.toString();
-    console.log(`\n🔍 Raw message length: ${messageValue.length} characters`);
 
     let event;
     try {
       event = JSON.parse(messageValue);
     } catch (parseError) {
-      console.error('❌ Failed to parse JSON message:', parseError.message);
+      console.error('Failed to parse JSON message:', parseError.message);
       console.log('Raw message content:', messageValue.substring(0, 500) + '...');
       return;
     }
 
-    // Debug: Show event structure
-    console.log('🔍 Event keys:', Object.keys(event));
-    console.log('🔍 Event structure preview:', JSON.stringify(event, null, 2).substring(0, 300) + '...');
-
     // Format the event for display
     const formattedEvent = formatCDCEvent(topic, message, event);
 
-    // Display the CDC event header
-    console.log('\n' + '='.repeat(100));
-    console.log('📊 CDC EVENT DETECTED');
-    console.log('='.repeat(100));
-    console.log(`🕒 Timestamp: ${formattedEvent.timestamp}`);
-    console.log(`📋 Table: ${formattedEvent.tableName}`);
-    console.log(`🗃️  Database: ${formattedEvent.database}`);
-    console.log(`⚡ Operation: ${formattedEvent.operation}`);
-    console.log(`📍 Topic: ${topic}`);
-    console.log(`🔢 Offset: ${formattedEvent.offset} | Partition: ${formattedEvent.partition || 'N/A'}`);
-    console.log(`🔍 Detected Operation: ${formattedEvent.detectedOperation} → ${formattedEvent.operation}`);
-
-    // Show what data we found
-    const hasData = formattedEvent.data;
-    const hasBefore = formattedEvent.dataBefore;
-    const hasAfter = formattedEvent.dataAfter;
-    const hasDeleted = formattedEvent.deletedData;
-
-    console.log(`\n🔍 Data Analysis:`);
-    console.log(`   Has data: ${hasData ? '✓' : '✗'}`);
-    console.log(`   Has before: ${hasBefore ? '✓' : '✗'}`);
-    console.log(`   Has after: ${hasAfter ? '✓' : '✗'}`);
-    console.log(`   Has deleted: ${hasDeleted ? '✓' : '✗'}`);
+    // Display the CDC event
+    console.log('\n' + '='.repeat(80));
+    console.log('CDC EVENT DETECTED');
+    console.log('='.repeat(80));
+    console.log(`Timestamp: ${formattedEvent.timestamp}`);
+    console.log(`Table: ${formattedEvent.tableName}`);
+    console.log(`Database: ${formattedEvent.database}`);
+    console.log(`Operation: ${formattedEvent.operation}`);
+    console.log(`Topic: ${topic}`);
+    console.log(`Offset: ${formattedEvent.offset} | Partition: ${formattedEvent.partition || 'N/A'}`);
 
     // Show record metadata if available
     if (formattedEvent.data) {
-      console.log(`\n📊 Record Metadata:`);
+      console.log(`\nRecord Metadata:`);
       if (formattedEvent.data.name) console.log(`   Record ID: ${formattedEvent.data.name}`);
       if (formattedEvent.data.creation) {
         const creationDate = new Date(formattedEvent.data.creation / 1000).toISOString();
@@ -300,65 +296,38 @@ const processCDCMessage = async (topic, message) => {
       }
       if (formattedEvent.data.modified_by) console.log(`   Modified by: ${formattedEvent.data.modified_by}`);
     }
-    // Display all data based on operation type
+
+    // Display data based on operation type
     if (formattedEvent.operation === 'CREATE' || formattedEvent.operation === 'READ (Snapshot)') {
       if (formattedEvent.data) {
         console.log(formatAllDataFields(formattedEvent.data, "Record Data"));
-      } else {
-        console.log('\n⚠️  No data found for CREATE/READ operation');
       }
-
     } else if (formattedEvent.operation === 'UPDATE') {
       if (formattedEvent.dataAfter) {
-        console.log(formatAllDataFields(formattedEvent.dataAfter, "Current Record Data (After Update)"));
-        console.log('\n💡 Note: ERPNext CDC format does not provide "before" data for updates');
-        console.log('    The data shown represents the current state after the change');
+        console.log(formatAllDataFields(formattedEvent.dataAfter, "urrent Record Data (After Update)"));
+        console.log('\nNote: ERPNext CDC format does not provide "before" data for updates');
       } else if (formattedEvent.data) {
         console.log(formatAllDataFields(formattedEvent.data, "Current Record Data"));
-      } else {
-        console.log('\n⚠️  No data found for UPDATE operation');
       }
-
     } else if (formattedEvent.operation === 'DELETE') {
       if (formattedEvent.deletedData) {
         console.log(formatAllDataFields(formattedEvent.deletedData, "Deleted Record Data"));
-      } else {
-        console.log('\n⚠️  No deleted data found for DELETE operation');
-      }
-    } else {
-      // Fallback for any unrecognized operations
-      console.log('\n⚠️  Unrecognized operation - showing all available data:');
-      if (formattedEvent.data) {
-        console.log(formatAllDataFields(formattedEvent.data, "Available Data"));
-      } else {
-        console.log('\n🔍 Raw Event Data:');
-        console.log(JSON.stringify(event, null, 2));
       }
     }
 
-    // Always show raw event structure if debug mode is enabled
-    if (process.env.DEBUG_RAW_EVENT === 'true') {
-      console.log('\n🔍 Complete Raw CDC Event:');
-      console.log(JSON.stringify(event, null, 2));
-    }
+    console.log('='.repeat(80));
+    console.log('Event displayed successfully\n');
 
-    console.log('='.repeat(100));
-
-    // Save to log file with all data
+    // Save to log file
     await saveCDCEventLog({
       ...formattedEvent,
-      allData: {
-        before: formattedEvent.dataBefore,
-        after: formattedEvent.dataAfter || formattedEvent.data,
-        deleted: formattedEvent.deletedData
-      },
-      rawEventStructure: Object.keys(event)
+      processed: true,
+      processedAt: new Date().toISOString()
     });
 
   } catch (error) {
-    console.error('❌ Error processing CDC message:', error);
+    console.error('Error processing CDC message:', error);
     console.error('Raw message content:', message.value.toString().substring(0, 1000));
-    console.error('Stack trace:', error.stack);
   }
 };
 
@@ -372,22 +341,23 @@ async function run() {
   await loadProcessedRecords();
 
   console.log(`
-🚀 Starting ERPNext CDC Event Tracker
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📡 Kafka Broker: ${kafkaBroker}
-🎯 Target Tables: Employee, User  
-📊 Database: _0775ec53bab106f5
-⚡ Mode: LIVE tracking (new changes only)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ERPNext CDC Event Display Tracker
+================================================================
+Kafka Broker: ${kafkaBroker}
+Target Tables: ${targetTableNames.join(', ')}
+Mode: Dynamic topic detection
+Functionality: DISPLAY ONLY - No blockchain integration
+Auto-detects ERPNext database hash from available topics
+================================================================
 `);
 
   while (!connected && retries < maxRetries) {
     try {
-      console.log(`🔄 Connecting to Kafka... (attempt ${retries + 1}/${maxRetries})`);
+      console.log(`Connecting to Kafka... (attempt ${retries + 1}/${maxRetries})`);
 
       // Connect to Kafka
       await consumer.connect();
-      console.log('✅ Connected to Kafka successfully');
+      console.log('Connected to Kafka successfully');
       connected = true;
 
       // Check if topics exist
@@ -399,25 +369,38 @@ async function run() {
       if (employeeTopicExists) {
         topicsToSubscribe.push(employeeTopic);
       } else {
-        console.log(`⚠️  Warning: Employee topic ${employeeTopic} not found`);
+        console.log(`Warning: Employee topic ${employeeTopic} not found`);
       }
 
       if (userTopicExists) {
         topicsToSubscribe.push(userTopic);
       } else {
-        console.log(`⚠️  Warning: User topic ${userTopic} not found`);
+        console.log(`Warning: User topic ${userTopic} not found`);
       }
 
       if (topicsToSubscribe.length === 0) {
-        console.log('❌ No target topics found. Make sure Debezium connector is registered and tables have data.');
-        console.log('💡 Try running the register-connector.js script first.');
+        console.log('No target topics found.');
+        console.log('Available ERPNext topics:');
+
+        // Show what topics ARE available
+        const allErpTopics = topics.filter(topic => topic.startsWith('erpnext.') && topic.includes('.tab'));
+        if (allErpTopics.length > 0) {
+          allErpTopics.forEach(topic => {
+            console.log(`  ${topic}`);
+          });
+          console.log('The tracker will look for tabEmployee and tabUser topics from any database.');
+        } else {
+          console.log('   No ERPNext table topics found at all.');
+          console.log('Make sure Debezium connector is registered and tables have data.');
+        }
+
         process.exit(1);
       }
 
-      // Subscribe to available topics - Start from LATEST, not beginning
+      // Subscribe to available topics - Start from LATEST for live monitoring
       for (const topic of topicsToSubscribe) {
-        await consumer.subscribe({ topic, fromBeginning: false }); // Changed to false
-        console.log(`📌 Subscribed to: ${topic} (latest messages only)`);
+        await consumer.subscribe({ topic, fromBeginning: false });
+        console.log(`Subscribed to: ${topic} (latest messages only)`);
       }
 
       // Start consuming messages
@@ -427,20 +410,20 @@ async function run() {
         },
       });
 
-      console.log('\n🎧 CDC Event Tracker is now listening for NEW changes only...');
-      console.log('💡 Make changes to Employee or User data in ERPNext to see LIVE CDC events');
-      console.log('📋 ALL data fields will be displayed (including NULL values)');
-      console.log('🔧 Set DEBUG_RAW_EVENT=true to see raw CDC event structure');
-      console.log('⚡ Only NEW changes from this point forward will be shown');
-      console.log('🛑 Press Ctrl+C to stop\n');
+      console.log('\nCDC Event Display Tracker is now listening...');
+      console.log('Make changes to target table data in ERPNext to see LIVE CDC events');
+      console.log('All data fields will be displayed for each event');
+      console.log('Events are logged to cdc_events_log.json for reference');
+      console.log('Only displaying events - no blockchain integration');
+      console.log('Press Ctrl+C to stop\n');
 
     } catch (error) {
       retries++;
-      console.error(`❌ Connection attempt ${retries} failed:`, error.message);
+      console.error(`Connection attempt ${retries} failed:`, error.message);
 
       if (retries >= maxRetries) {
-        console.error('💥 Maximum retries reached. Exiting.');
-        console.log('\n🔧 Troubleshooting steps:');
+        console.error('Maximum retries reached. Exiting.');
+        console.log('\nTroubleshooting steps:');
         console.log('1. Make sure Kafka is running on', kafkaBroker);
         console.log('2. Verify Debezium connector is registered');
         console.log('3. Check that ERPNext database is accessible');
@@ -448,7 +431,7 @@ async function run() {
       }
 
       const backoffTime = Math.min(10000, 1000 * Math.pow(2, retries));
-      console.log(`⏳ Waiting ${backoffTime / 1000} seconds before retrying...`);
+      console.log(`Waiting ${backoffTime / 1000} seconds before retrying...`);
       await new Promise(resolve => setTimeout(resolve, backoffTime));
     }
   }
@@ -457,15 +440,15 @@ async function run() {
 // Start the consumer with auto-restart
 function startWithAutoRestart() {
   run().catch(error => {
-    console.error('💥 Fatal error in CDC tracker:', error);
-    console.log('🔄 Restarting in 10 seconds...');
+    console.error('Fatal error in CDC display tracker:', error);
+    console.log('Restarting in 10 seconds...');
     setTimeout(startWithAutoRestart, 10000);
   });
 }
 
 // Display summary statistics
 function displaySummary() {
-  console.log(`\n📈 CDC Events Summary: ${processedRecords.length} events tracked`);
+  console.log(`\nCDC Events Summary: ${processedRecords.length} events displayed`);
 
   if (processedRecords.length > 0) {
     const operations = processedRecords.reduce((acc, event) => {
@@ -473,9 +456,16 @@ function displaySummary() {
       return acc;
     }, {});
 
-    console.log('📊 Operations breakdown:');
+    console.log('Operations breakdown:');
     Object.entries(operations).forEach(([op, count]) => {
-      console.log(`   ${op}: ${count}`);
+      console.log(`   ${op}: ${count} events`);
+    });
+
+    // Show recent events
+    const recentEvents = processedRecords.slice(-5);
+    console.log('\nRecent Events:');
+    recentEvents.forEach((event, index) => {
+      console.log(`   ${index + 1}. ${event.operation} on ${event.tableName} at ${event.timestamp}`);
     });
   }
 }
@@ -485,24 +475,24 @@ startWithAutoRestart();
 
 // Handle termination signals
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down CDC tracker...');
+  console.log('\nShutting down CDC Display Tracker...');
   displaySummary();
   try {
     await consumer.disconnect();
-    console.log('✅ Disconnected from Kafka');
+    console.log('Disconnected from Kafka');
   } catch (e) {
-    console.error('❌ Error during disconnect:', e);
+    console.error('Error during disconnect:', e);
   }
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  console.log('\n🛑 Shutting down CDC tracker...');
+  console.log('\nShutting down CDC Display Tracker...');
   displaySummary();
   try {
     await consumer.disconnect();
   } catch (e) {
-    console.error('❌ Error during disconnect:', e);
+    console.error('Error during disconnect:', e);
   }
   process.exit(0);
 });

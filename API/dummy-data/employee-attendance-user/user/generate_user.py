@@ -59,8 +59,8 @@ class Config:
     COMPANY_ABBR = os.getenv("COMPANY_ABBR")
 
     # Data Volume - Set to 50 users to stay within ERPNext limits
-    TARGET_USERS = 50
-    DAILY_USER_LIMIT = 50  # Match target to avoid confusion
+    TARGET_USERS = 2
+    DAILY_USER_LIMIT = 2  # Match target to avoid confusion
 
     # Retry settings - adjusted for user creation throttling
     RETRY_ATTEMPTS = 3

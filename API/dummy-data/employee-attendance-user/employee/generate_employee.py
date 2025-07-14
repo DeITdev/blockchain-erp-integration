@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-ERPNext Employee Generator with Master Data (Fixed for Attendance Dates)
-Generates 50 employees using existing Branch, Employee Grade, Department, etc.
+ERPNext Employee Generator with Master Data (Independent of Users)
+Generates employees without requiring existing users - creates standalone employee records.
 FIXED: Ensures joining dates are before June 2025 to allow attendance creation.
 Uses environment variables from .env file for configuration.
 Author: ERPNext Employee Generator
-Version: 2.1.0 (Fixed for Attendance)
+Version: 3.0.0 (Independent Employee Creation)
 """
 
 import requests
@@ -56,7 +56,7 @@ COMPANY_NAME = os.getenv("COMPANY_NAME")
 COMPANY_ABBR = os.getenv("COMPANY_ABBR")
 
 # Employee Configuration
-TARGET_EMPLOYEES = 50
+TARGET_EMPLOYEES = 1000
 
 # Date ranges - FIXED FOR ATTENDANCE COMPATIBILITY
 BIRTH_YEAR_START = 1990
@@ -161,12 +161,11 @@ class ERPNextAPI:
 
 
 class EmployeeGenerator:
-    """Generates employee records using existing master data"""
+    """Generates employee records using existing master data - independent of users"""
 
     def __init__(self):
         self.fake = Faker('id_ID')
         self.api = ERPNextAPI()
-        self.users = []
         self.employees = []
 
         # Master data collections
@@ -179,35 +178,7 @@ class EmployeeGenerator:
         }
 
         # Fetch all required data during initialization
-        self._fetch_users()
         self._fetch_master_data()
-
-    def _fetch_users(self):
-        """Fetch existing users to base employee data on"""
-        logger.info("📋 Fetching existing users...")
-
-        try:
-            all_users = self.api.get_list("User",
-                                          filters=[
-                                              ["name", "not in", [
-                                                  "Administrator", "Guest"]],
-                                              ["enabled", "=", 1]
-                                          ],
-                                          fields=["name", "email", "first_name", "last_name", "mobile_no", "phone"])
-
-            self.users = all_users
-            logger.info(
-                f"✅ Found {len(self.users)} users available for employee creation")
-
-            if not self.users:
-                logger.error("❌ No users found! Please create users first.")
-                return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error fetching users: {str(e)}")
-            return False
 
     def _fetch_master_data(self):
         """Fetch all required master data from ERPNext"""
@@ -302,7 +273,14 @@ class EmployeeGenerator:
                 "Junior Executive",
                 "Analyst",
                 "Senior Analyst",
-                "Specialist"
+                "Specialist",
+                "Team Lead",
+                "Senior Developer",
+                "Developer",
+                "Junior Developer",
+                "Coordinator",
+                "Supervisor",
+                "Officer"
             ]
             logger.info(
                 f"✅ Designations (fallback): {len(self.master_data['designations'])} available")
@@ -360,6 +338,27 @@ class EmployeeGenerator:
         """Generate valid Indonesian phone number"""
         return f"+628{random.randint(100_000_000, 9_999_999_999):010d}"
 
+    def generate_employee_id(self, index: int) -> str:
+        """Generate unique employee ID"""
+        return f"{COMPANY_ABBR}-EMP-{index:05d}"
+
+    def generate_email(self, first_name: str, last_name: str, index: int) -> str:
+        """Generate email address for employee"""
+        # Clean names for email
+        first_clean = first_name.lower().replace(" ", "")
+        last_clean = last_name.lower().replace(" ", "")
+
+        # Try different email formats
+        email_formats = [
+            f"{first_clean}.{last_clean}@company.com",
+            f"{first_clean}{last_clean}@company.com",
+            f"{first_clean}.{last_clean}{index}@company.com",
+            f"{first_clean[0]}{last_clean}@company.com",
+            f"{first_clean}{last_clean[0]}@company.com"
+        ]
+
+        return random.choice(email_formats)
+
     def check_existing_employees(self):
         """Check existing employees and determine how many to create"""
         logger.info("📊 Checking existing employees...")
@@ -368,7 +367,7 @@ class EmployeeGenerator:
             existing_employees = self.api.get_list("Employee",
                                                    filters={
                                                        "company": COMPANY_NAME, "status": "Active"},
-                                                   fields=["name", "employee_name", "user_id"])
+                                                   fields=["name", "employee_name"])
 
             current_employee_count = len(existing_employees)
             self.employees = existing_employees
@@ -391,30 +390,10 @@ class EmployeeGenerator:
             logger.error(f"Error checking existing employees: {str(e)}")
             return TARGET_EMPLOYEES
 
-    def get_available_users_for_employees(self):
-        """Get users that are not already linked to employees"""
-        logger.info("👥 Finding users available for employee creation...")
-
-        # Get list of user IDs already linked to employees
-        linked_user_ids = set()
-        for employee in self.employees:
-            if employee.get("user_id"):
-                linked_user_ids.add(employee["user_id"])
-
-        # Filter users that are not yet linked to employees
-        available_users = [
-            user for user in self.users if user["name"] not in linked_user_ids]
-
-        logger.info(
-            f"Found {len(available_users)} users available for employee creation")
-        logger.info(
-            f"(out of {len(self.users)} total users, {len(linked_user_ids)} already linked)")
-
-        return available_users
-
     def create_employees(self):
-        """Create employee records with master data"""
-        logger.info("🚀 Starting employee creation with master data...")
+        """Create employee records with generated data"""
+        logger.info(
+            "🚀 Starting independent employee creation with master data...")
         logger.info(
             "🎯 FIXED: All joining dates will be before June 2025 for attendance compatibility")
 
@@ -425,47 +404,38 @@ class EmployeeGenerator:
             logger.info("No new employees need to be created.")
             return
 
-        # Get available users
-        available_users = self.get_available_users_for_employees()
-
-        if not available_users:
-            logger.error("❌ No available users found for employee creation!")
-            return
-
-        if len(available_users) < employees_to_create:
-            logger.warning(
-                f"⚠️ Only {len(available_users)} users available, but need {employees_to_create} employees")
-            employees_to_create = len(available_users)
-
         print("\n" + "="*60)
-        print("👥 Creating Employees with Master Data (ATTENDANCE COMPATIBLE)")
+        print("👥 Creating Independent Employees with Master Data (ATTENDANCE COMPATIBLE)")
         print("="*60)
         print("🎯 All joining dates will be before June 2025")
         print("✅ This ensures attendance can be created for June 2025 onwards")
+        print("🔄 Employees created independently without requiring existing users")
         print("="*60)
 
         employees_created_count = 0
-        random.shuffle(available_users)  # Randomize user selection
+        # Start from current employee count + 1
+        start_index = len(self.employees) + 1
 
         for i in range(employees_to_create):
-            user = available_users[i]
+            current_index = start_index + i
 
-            # Extract user data
-            first_name = user.get("first_name", "")
-            last_name = user.get("last_name", "")
-            full_name = f"{first_name} {last_name}".strip()
-            email = user.get("email", "")
-            mobile_no = user.get("mobile_no") or user.get(
-                "phone") or self.generate_phone_number()
+            # Generate employee data using Faker
+            first_name = self.fake.first_name()
+            last_name = self.fake.last_name()
+            full_name = f"{first_name} {last_name}"
 
-            # Generate employee-specific data
-            employee_name = full_name if full_name else f"Employee {i+1:03d}"
+            # Generate other personal data
             gender = random.choice(["Male", "Female"])
             date_of_birth = self.generate_random_date_in_range(
                 BIRTH_YEAR_START, BIRTH_YEAR_END)
 
             # CRITICAL FIX: Use the new method to ensure early joining dates
             date_of_joining = self.generate_early_joining_date()
+
+            # Generate contact information
+            mobile_no = self.generate_phone_number()
+            email = self.generate_email(first_name, last_name, current_index)
+            employee_id = self.generate_employee_id(current_index)
 
             # Verify the joining date is indeed before June 2025
             join_date_obj = datetime.strptime(date_of_joining, "%Y-%m-%d")
@@ -478,14 +448,15 @@ class EmployeeGenerator:
                 logger.info(f"✅ Fixed join date to: {date_of_joining}")
 
             # Check if employee already exists
-            if self.api.check_exists("Employee", employee_name):
+            if self.api.check_exists("Employee", full_name):
                 logger.debug(
-                    f"Employee '{employee_name}' already exists, skipping...")
-                continue
+                    f"Employee '{full_name}' already exists, trying with different name...")
+                # Try with employee ID instead
+                full_name = f"{first_name} {last_name} {current_index}"
 
             # Prepare employee data with master data
             employee_data = {
-                "employee_name": employee_name,
+                "employee_name": full_name,
                 "first_name": first_name,
                 "last_name": last_name,
                 "gender": gender,
@@ -493,10 +464,10 @@ class EmployeeGenerator:
                 "date_of_joining": date_of_joining,
                 "company": COMPANY_NAME,
                 "status": "Active",
-                "user_id": user["name"],  # Link to the user
                 "cell_number": mobile_no,
                 "personal_email": email,
-                "prefered_contact_email": "Personal Email"
+                "prefered_contact_email": "Personal Email",
+                "employee_number": employee_id
             }
 
             # Add master data fields (randomly selected from available options)
@@ -537,16 +508,15 @@ class EmployeeGenerator:
             else:
                 master_data_status["Grade"] = "❌"
 
-            # Reports to is left null as requested
-
             try:
                 employee = self.api.create_doc("Employee", employee_data)
                 employees_created_count += 1
 
                 print(
-                    f"✅ {employees_created_count}/{employees_to_create}: {employee_name}")
-                print(f"   👤 User: {user['name']}")
+                    f"✅ {employees_created_count}/{employees_to_create}: {full_name}")
+                print(f"   🆔 ID: {employee_id}")
                 print(f"   📧 Email: {email}")
+                print(f"   📱 Mobile: {mobile_no}")
                 print(f"   🎂 Birth: {date_of_birth}")
                 print(f"   📅 Join: {date_of_joining} ✅ (Before June 2025)")
 
@@ -570,14 +540,14 @@ class EmployeeGenerator:
                         print(f"      {status} {field}: Not available")
                 print()
 
-                # Small delay
-                time.sleep(0.3)
+                # No delay for faster processing
+                # time.sleep(0.3)  # Removed for maximum speed
 
             except Exception as e:
                 logger.error(
-                    f"❌ Failed to create employee '{employee_name}': {str(e)}")
+                    f"❌ Failed to create employee '{full_name}': {str(e)}")
                 print(
-                    f"❌ {employees_created_count+1}/{employees_to_create}: {employee_name} - FAILED")
+                    f"❌ {employees_created_count+1}/{employees_to_create}: {full_name} - FAILED")
                 print(f"   Error: {str(e)[:100]}...")
                 print()
 
@@ -589,6 +559,7 @@ class EmployeeGenerator:
             f"✅ Employees Created: {employees_created_count}/{employees_to_create}")
         print(f"🎯 All joining dates are before June 2025 ✅")
         print(f"📅 This allows attendance creation for June 2025 onwards")
+        print(f"🔄 All employees created independently without requiring users")
         print(f"📊 Master Data Used:")
         print(f"   🏢 Branches: {len(self.master_data['branches'])}")
         print(
@@ -599,14 +570,15 @@ class EmployeeGenerator:
         print(f"   🎯 Designations: {len(self.master_data['designations'])}")
 
         logger.info(
-            f"Successfully created {employees_created_count} employees with master data")
+            f"Successfully created {employees_created_count} independent employees with master data")
         logger.info(
             "🎯 All employees have joining dates before June 2025 - attendance creation will work!")
 
     def run(self):
         """Main execution method"""
         print("=" * 80)
-        print("👥 ERPNext Employee Generator with Master Data (ATTENDANCE FIXED)")
+        print(
+            "👥 ERPNext Independent Employee Generator with Master Data (ATTENDANCE FIXED)")
         print("=" * 80)
         print(f"📡 API Endpoint: {BASE_URL}")
         print(f"🏢 Company: {COMPANY_NAME}")
@@ -616,20 +588,17 @@ class EmployeeGenerator:
             f"📅 Join Date Range: {JOIN_EARLY_2025_START.strftime('%Y-%m-%d')} to {JOIN_EARLY_2025_END.strftime('%Y-%m-%d')}")
         print("🎯 FIXED: All joining dates will be before June 2025")
         print("✅ This ensures attendance can be created without validation errors")
+        print("🔄 No dependency on existing users - creates standalone employees")
         print("=" * 80)
 
         try:
-            # Check if we have users to work with
-            if not self.users:
-                print("❌ No users found! Please create users first.")
-                return
-
             # Create employees
             self.create_employees()
 
             print(f"\n🎉 EMPLOYEE GENERATION COMPLETED!")
             print("✅ All employees now have joining dates before June 2025")
             print("📅 Attendance creation for June 2025 should work without errors")
+            print("🔄 All employees created independently without user dependencies")
 
         except Exception as e:
             logger.error(f"Fatal error during employee generation: {str(e)}")
@@ -638,7 +607,7 @@ class EmployeeGenerator:
 
 def main():
     """Main entry point"""
-    print("🚀 Starting ERPNext Employee Generation with Master Data (ATTENDANCE FIXED)...")
+    print("🚀 Starting ERPNext Independent Employee Generation with Master Data (ATTENDANCE FIXED)...")
 
     # Check if API credentials are set
     if not API_KEY or not API_SECRET:
@@ -648,9 +617,10 @@ def main():
     print(f"\n🎯 This script fixes the attendance date validation error!")
     print(f"✅ All employees will have joining dates before June 2025")
     print(f"📅 This allows attendance creation for June 2025 onwards")
+    print(f"🔄 Creates employees independently without requiring existing users")
 
     response = input(
-        f"\nThis will create up to {TARGET_EMPLOYEES} employees using existing master data. Continue? (yes/no): ")
+        f"\nThis will create up to {TARGET_EMPLOYEES} independent employees using existing master data. Continue? (yes/no): ")
     if response.lower() != 'yes':
         print("Operation cancelled.")
         return

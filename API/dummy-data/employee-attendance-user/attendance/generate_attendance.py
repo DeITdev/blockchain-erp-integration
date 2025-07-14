@@ -109,7 +109,6 @@ class AttendanceGenerator:
             if retry_count < 3:
                 logger.warning(
                     f"Request failed to {url}, retrying... ({retry_count + 1}/3) - Error: {e}")
-                time.sleep(2)
                 return self._make_request(method, endpoint, data, retry_count + 1)
             else:
                 logger.error(
@@ -321,9 +320,6 @@ class AttendanceGenerator:
                         f"   ✅ {date_index + 1}/{len(employee_dates)}: {attendance_date} - {status}")
                     print(
                         f"      {shift_indicator} | Late: {late_indicator} | Early: {early_indicator}")
-
-                    # Small delay to avoid overwhelming server
-                    time.sleep(0.1)
 
                 except Exception as e:
                     failed_count += 1
