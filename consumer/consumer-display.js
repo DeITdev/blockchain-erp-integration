@@ -257,6 +257,32 @@ async function checkTopics() {
 // Process CDC message - Display Only
 const processCDCMessage = async (topic, message) => {
   try {
+    // FIX: Add a check for null message value
+    if (message.value === null) {
+      console.log('\n' + '='.repeat(80));
+      console.log('TOMBSTONE MESSAGE DETECTED (record deletion)');
+      console.log('='.repeat(80));
+      console.log(`Timestamp: ${new Date(parseInt(message.timestamp)).toISOString()}`);
+      console.log(`Topic: ${topic}`);
+      console.log(`Offset: ${message.offset} | Partition: ${message.partition || 'N/A'}`);
+      console.log('This message indicates that a record was deleted in the source database.');
+      console.log('='.repeat(80));
+
+      // Optionally, you can log this to your event log as well
+      await saveCDCEventLog({
+        timestamp: new Date(parseInt(message.timestamp)).toISOString(),
+        topic,
+        offset: message.offset,
+        partition: message.partition,
+        operation: 'DELETE (Tombstone)',
+        tableName: topic.split('.').pop(),
+        database: topic.split('.')[1],
+        processed: true,
+        processedAt: new Date().toISOString()
+      });
+      return; // Stop further processing for this message
+    }
+
     const messageValue = message.value.toString();
 
     let event;
