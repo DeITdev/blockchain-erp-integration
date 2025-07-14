@@ -1,0 +1,70 @@
+{
+  "timestamp": "2025-07-14T06:14:23.315Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "DELETE (Tombstone)",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "56",
+  "processed": true,
+  "processedAt": "2025-07-14T06:14:23.315Z"
+}
+{
+  "timestamp": "2025-07-14T06:14:58.994Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "UNKNOWN",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "57",
+  "processed": true,
+  "processedAt": "2025-07-14T06:14:58.999Z"
+}
+{
+  "timestamp": "2025-07-14T06:14:59.479Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "UNKNOWN",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "58",
+  "processed": true,
+  "processedAt": "2025-07-14T06:14:59.480Z"
+}
+{
+  "timestamp": "2025-07-14T06:14:59.489Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "UNKNOWN",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "59",
+  "processed": true,
+  "processedAt": "2025-07-14T06:14:59.489Z"
+}
+{
+  "timestamp": "2025-07-14T06:15:14.608Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabUser",
+  "operation": "UNKNOWN",
+  "topic": "erpnext._ef6745b475ee7a4e.tabUser",
+  "offset": "119",
+  "processed": true,
+  "processedAt": "2025-07-14T06:15:14.608Z"
+}
+{
+  "timestamp": "2025-07-14T06:15:19.124Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "UNKNOWN",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "60",
+  "processed": true,
+  "processedAt": "2025-07-14T06:15:19.125Z"
+}
+{
+  "timestamp": "2025-07-14T06:15:19.128Z",
+  "database": "_ef6745b475ee7a4e",
+  "tableName": "tabEmployee",
+  "operation": "DELETE (Tombstone)",
+  "topic": "erpnext._ef6745b475ee7a4e.tabEmployee",
+  "offset": "61",
+  "processed": true,
+  "processedAt": "2025-07-14T06:15:19.128Z"
+}
