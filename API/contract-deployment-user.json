@@ -1,0 +1,22 @@
+{
+  "success": true,
+  "contractType": "user",
+  "contractName": "UserStorage",
+  "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+  "transactionHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "blockNumber": 1000,
+  "blockHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "gasUsed": 1000000,
+  "gasLimit": 8000000,
+  "gasPrice": "1000000000",
+  "deployerAddress": "0xFE3B557E8Fb62b89F4916B721be55cEb828dBd73",
+  "deploymentTime": "2025-07-15T06:50:18.843Z",
+  "constructorArgs": [],
+  "transactionDetails": {
+    "nonce": 1,
+    "cumulativeGasUsed": 1000000,
+    "effectiveGasPrice": 1000000000,
+    "status": true,
+    "chainId": 1337
+  }
+}

@@ -1,0 +1,572 @@
+{
+  "sessionInfo": {
+    "startTime": "2025-07-15T06:42:27.375Z",
+    "endTime": "2025-07-15T06:46:28.449Z",
+    "duration": 241074,
+    "totalEvents": 38
+  },
+  "moduleStats": {
+    "tabUser": {
+      "totalEvents": 5,
+      "successfulEvents": 0,
+      "successRate": 0,
+      "kafkaLatency": {
+        "avg": 15776,
+        "min": 1142,
+        "max": 39975
+      },
+      "blockchainLatency": {
+        "avg": 2068,
+        "min": 2052,
+        "max": 2092
+      },
+      "totalLatency": {
+        "avg": 17845,
+        "min": 3207,
+        "max": 42046
+      }
+    },
+    "tabEmployee": {
+      "totalEvents": 1,
+      "successfulEvents": 0,
+      "successRate": 0,
+      "kafkaLatency": {
+        "avg": 4,
+        "min": 4,
+        "max": 4
+      },
+      "blockchainLatency": {
+        "avg": 1131,
+        "min": 1131,
+        "max": 1131
+      },
+      "totalLatency": {
+        "avg": 1135,
+        "min": 1135,
+        "max": 1135
+      }
+    },
+    "tabCompany": {
+      "totalEvents": 30,
+      "successfulEvents": 0,
+      "successRate": 0,
+      "kafkaLatency": {
+        "avg": 61020,
+        "min": 8,
+        "max": 103682
+      },
+      "blockchainLatency": {
+        "avg": 3869,
+        "min": 1052,
+        "max": 30017
+      },
+      "totalLatency": {
+        "avg": 64888,
+        "min": 2120,
+        "max": 105743
+      }
+    },
+    "tabAttendance": {
+      "totalEvents": 2,
+      "successfulEvents": 2,
+      "successRate": 100,
+      "kafkaLatency": {
+        "avg": 67,
+        "min": 5,
+        "max": 128
+      },
+      "blockchainLatency": {
+        "avg": 2080,
+        "min": 2067,
+        "max": 2092
+      },
+      "totalLatency": {
+        "avg": 2146,
+        "min": 2097,
+        "max": 2195
+      }
+    }
+  },
+  "contractAddresses": {
+    "tabUser": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+    "tabEmployee": "0xC9Bc439c8723c5c6fdbBE14E5fF3a1a40CdD5E821",
+    "tabTask": "0x9a3DBCa554e9f6b9257aAa24010DA8377C57c17e",
+    "tabCompany": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+    "tabAttendance": "0xa50a51c09a5c451C52BB714527E1974b686D8e77"
+  },
+  "rawData": {
+    "tabUser": [
+      {
+        "timestamp": "2025-07-15T06:43:37.484Z",
+        "recordId": "Administrator",
+        "operation": "UPDATE",
+        "kafkaLatency": 2025,
+        "blockchainLatency": 2092,
+        "totalLatency": 4117,
+        "success": false,
+        "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+        "kafkaTimestamp": 1752561813364,
+        "processedTimestamp": 1752561815389
+      },
+      {
+        "timestamp": "2025-07-15T06:45:33.569Z",
+        "recordId": "Administrator",
+        "operation": "UPDATE",
+        "kafkaLatency": 39975,
+        "blockchainLatency": 2071,
+        "totalLatency": 42046,
+        "success": false,
+        "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+        "kafkaTimestamp": 1752561891521,
+        "processedTimestamp": 1752561931496
+      },
+      {
+        "timestamp": "2025-07-15T06:45:35.624Z",
+        "recordId": "Administrator",
+        "operation": "UPDATE",
+        "kafkaLatency": 32530,
+        "blockchainLatency": 2052,
+        "totalLatency": 34582,
+        "success": false,
+        "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+        "kafkaTimestamp": 1752561901041,
+        "processedTimestamp": 1752561933571
+      },
+      {
+        "timestamp": "2025-07-15T06:46:09.882Z",
+        "recordId": "Administrator",
+        "operation": "UPDATE",
+        "kafkaLatency": 1142,
+        "blockchainLatency": 2065,
+        "totalLatency": 3207,
+        "success": false,
+        "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+        "kafkaTimestamp": 1752561966673,
+        "processedTimestamp": 1752561967815
+      },
+      {
+        "timestamp": "2025-07-15T06:46:11.945Z",
+        "recordId": "Administrator",
+        "operation": "UPDATE",
+        "kafkaLatency": 3209,
+        "blockchainLatency": 2062,
+        "totalLatency": 5271,
+        "success": false,
+        "contractAddress": "0x9B8397f1B0FEcD3a1a40CdD5E8221Fa461898517",
+        "kafkaTimestamp": 1752561966673,
+        "processedTimestamp": 1752561969882
+      }
+    ],
+    "tabEmployee": [
+      {
+        "timestamp": "2025-07-15T06:46:07.808Z",
+        "recordId": "HR-EMP-00006",
+        "operation": "UPDATE",
+        "kafkaLatency": 4,
+        "blockchainLatency": 1131,
+        "totalLatency": 1135,
+        "success": false,
+        "contractAddress": "0xC9Bc439c8723c5c6fdbBE14E5fF3a1a40CdD5E821",
+        "kafkaTimestamp": 1752561966672,
+        "processedTimestamp": 1752561966676
+      }
+    ],
+    "tabTask": [],
+    "tabCompany": [
+      {
+        "timestamp": "2025-07-15T06:43:35.374Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 8,
+        "blockchainLatency": 2112,
+        "totalLatency": 2120,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813252,
+        "processedTimestamp": 1752561813260
+      },
+      {
+        "timestamp": "2025-07-15T06:43:39.540Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 4234,
+        "blockchainLatency": 2051,
+        "totalLatency": 6285,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813253,
+        "processedTimestamp": 1752561817487
+      },
+      {
+        "timestamp": "2025-07-15T06:43:41.601Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 6287,
+        "blockchainLatency": 2060,
+        "totalLatency": 8347,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813253,
+        "processedTimestamp": 1752561819540
+      },
+      {
+        "timestamp": "2025-07-15T06:43:43.701Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 8270,
+        "blockchainLatency": 2099,
+        "totalLatency": 10369,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813331,
+        "processedTimestamp": 1752561821601
+      },
+      {
+        "timestamp": "2025-07-15T06:44:13.715Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 10372,
+        "blockchainLatency": 30009,
+        "totalLatency": 40381,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813332,
+        "processedTimestamp": 1752561823704
+      },
+      {
+        "timestamp": "2025-07-15T06:44:15.834Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 40386,
+        "blockchainLatency": 2114,
+        "totalLatency": 42500,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813333,
+        "processedTimestamp": 1752561853719
+      },
+      {
+        "timestamp": "2025-07-15T06:44:17.932Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 42501,
+        "blockchainLatency": 2096,
+        "totalLatency": 44597,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813333,
+        "processedTimestamp": 1752561855834
+      },
+      {
+        "timestamp": "2025-07-15T06:44:20.009Z",
+        "recordId": "PT Anggur",
+        "operation": "CREATE",
+        "kafkaLatency": 44599,
+        "blockchainLatency": 2077,
+        "totalLatency": 46676,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813333,
+        "processedTimestamp": 1752561857932
+      },
+      {
+        "timestamp": "2025-07-15T06:44:50.028Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 46654,
+        "blockchainLatency": 30017,
+        "totalLatency": 76671,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813356,
+        "processedTimestamp": 1752561860010
+      },
+      {
+        "timestamp": "2025-07-15T06:44:51.082Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 76674,
+        "blockchainLatency": 1052,
+        "totalLatency": 77726,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813356,
+        "processedTimestamp": 1752561890030
+      },
+      {
+        "timestamp": "2025-07-15T06:44:53.160Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 77725,
+        "blockchainLatency": 2077,
+        "totalLatency": 79802,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813357,
+        "processedTimestamp": 1752561891082
+      },
+      {
+        "timestamp": "2025-07-15T06:44:55.211Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 79803,
+        "blockchainLatency": 2049,
+        "totalLatency": 81852,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813357,
+        "processedTimestamp": 1752561893160
+      },
+      {
+        "timestamp": "2025-07-15T06:44:57.276Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 81854,
+        "blockchainLatency": 2064,
+        "totalLatency": 83918,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813357,
+        "processedTimestamp": 1752561895211
+      },
+      {
+        "timestamp": "2025-07-15T06:44:59.338Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 83919,
+        "blockchainLatency": 2062,
+        "totalLatency": 85981,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813357,
+        "processedTimestamp": 1752561897276
+      },
+      {
+        "timestamp": "2025-07-15T06:45:01.406Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 85981,
+        "blockchainLatency": 2066,
+        "totalLatency": 88047,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813358,
+        "processedTimestamp": 1752561899339
+      },
+      {
+        "timestamp": "2025-07-15T06:45:03.570Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 88052,
+        "blockchainLatency": 2158,
+        "totalLatency": 90210,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813358,
+        "processedTimestamp": 1752561901410
+      },
+      {
+        "timestamp": "2025-07-15T06:45:05.646Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 90211,
+        "blockchainLatency": 2076,
+        "totalLatency": 92287,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813359,
+        "processedTimestamp": 1752561903570
+      },
+      {
+        "timestamp": "2025-07-15T06:45:07.708Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 92287,
+        "blockchainLatency": 2061,
+        "totalLatency": 94348,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813359,
+        "processedTimestamp": 1752561905646
+      },
+      {
+        "timestamp": "2025-07-15T06:45:09.765Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 94349,
+        "blockchainLatency": 2055,
+        "totalLatency": 96404,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813359,
+        "processedTimestamp": 1752561907708
+      },
+      {
+        "timestamp": "2025-07-15T06:45:11.841Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 96405,
+        "blockchainLatency": 2075,
+        "totalLatency": 98480,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813360,
+        "processedTimestamp": 1752561909765
+      },
+      {
+        "timestamp": "2025-07-15T06:45:13.909Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 98482,
+        "blockchainLatency": 2065,
+        "totalLatency": 100547,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813361,
+        "processedTimestamp": 1752561911843
+      },
+      {
+        "timestamp": "2025-07-15T06:45:15.987Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 100547,
+        "blockchainLatency": 2076,
+        "totalLatency": 102623,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813362,
+        "processedTimestamp": 1752561913909
+      },
+      {
+        "timestamp": "2025-07-15T06:45:17.045Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 102625,
+        "blockchainLatency": 1057,
+        "totalLatency": 103682,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813362,
+        "processedTimestamp": 1752561915987
+      },
+      {
+        "timestamp": "2025-07-15T06:45:19.107Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 103682,
+        "blockchainLatency": 2061,
+        "totalLatency": 105743,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561813363,
+        "processedTimestamp": 1752561917045
+      },
+      {
+        "timestamp": "2025-07-15T06:45:21.186Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 45132,
+        "blockchainLatency": 2067,
+        "totalLatency": 47199,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561873985,
+        "processedTimestamp": 1752561919117
+      },
+      {
+        "timestamp": "2025-07-15T06:45:23.247Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 47200,
+        "blockchainLatency": 2060,
+        "totalLatency": 49260,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561873986,
+        "processedTimestamp": 1752561921186
+      },
+      {
+        "timestamp": "2025-07-15T06:45:25.310Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 49263,
+        "blockchainLatency": 2060,
+        "totalLatency": 51323,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561873986,
+        "processedTimestamp": 1752561923249
+      },
+      {
+        "timestamp": "2025-07-15T06:45:27.369Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 51324,
+        "blockchainLatency": 2058,
+        "totalLatency": 53382,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561873986,
+        "processedTimestamp": 1752561925310
+      },
+      {
+        "timestamp": "2025-07-15T06:45:29.428Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 53383,
+        "blockchainLatency": 2058,
+        "totalLatency": 55441,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561873986,
+        "processedTimestamp": 1752561927369
+      },
+      {
+        "timestamp": "2025-07-15T06:45:31.493Z",
+        "recordId": "PT Anggur",
+        "operation": "UPDATE",
+        "kafkaLatency": 28388,
+        "blockchainLatency": 2064,
+        "totalLatency": 30452,
+        "success": false,
+        "contractAddress": "0x42699A7612A82f1d9C36148af9C77354759b210b",
+        "kafkaTimestamp": 1752561901040,
+        "processedTimestamp": 1752561929428
+      }
+    ],
+    "tabAttendance": [
+      {
+        "timestamp": "2025-07-15T06:43:09.796Z",
+        "recordId": "HR-ATT-2025-00003",
+        "operation": "CREATE",
+        "kafkaLatency": 5,
+        "blockchainLatency": 2092,
+        "totalLatency": 2097,
+        "success": true,
+        "transactionHash": "0x829d79a7c8a71baaba84fd8f053d9cf8d98275e0928b205ebd01437abd008391",
+        "contractAddress": "0xa50a51c09a5c451C52BB714527E1974b686D8e77",
+        "kafkaTimestamp": 1752561787697,
+        "processedTimestamp": 1752561787702
+      },
+      {
+        "timestamp": "2025-07-15T06:43:11.899Z",
+        "recordId": "HR-ATT-2025-00003",
+        "operation": "UPDATE",
+        "kafkaLatency": 128,
+        "blockchainLatency": 2067,
+        "totalLatency": 2195,
+        "success": true,
+        "transactionHash": "0x81f58c60e84bb1bd6b9f32f954055ca6185e49d175f0ea72e8ecb38f7f96054a",
+        "contractAddress": "0xa50a51c09a5c451C52BB714527E1974b686D8e77",
+        "kafkaTimestamp": 1752561789701,
+        "processedTimestamp": 1752561789829
+      }
+    ]
+  },
+  "recommendations": [
+    "High Kafka CDC latency detected. Check Debezium and Kafka configuration.",
+    "Low success rate detected. Check blockchain API error logs.",
+    "Average end-to-end latency: 21504ms",
+    "Overall success rate: 5%"
+  ]
+}
