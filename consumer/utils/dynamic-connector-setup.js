@@ -102,7 +102,7 @@ class DynamicConnectorSetup {
       config: {
         "connector.class": "io.debezium.connector.mysql.MySqlConnector",
         "tasks.max": "1",
-        "database.hostname": dbHost, // Use the converted host here
+        "database.hostname": dbHost,
         "database.port": this.dbConfig.port.toString(),
         "database.user": this.dbConfig.user,
         "database.password": this.dbConfig.password,
@@ -115,26 +115,64 @@ class DynamicConnectorSetup {
         "schema.history.internal.consumer.security.protocol": "PLAINTEXT",
         "schema.history.internal.producer.security.protocol": "PLAINTEXT",
         "include.schema.changes": "true",
-        "transforms": "unwrap",
+
+        // === ENHANCED TIMESTAMP TRACKING ===
+        // Enable transaction metadata for better timing
+        "provide.transaction.metadata": "true",
+
+        // Enhanced timestamp precision
+        "source.timestamp.mode": "connector",
+        "time.precision.mode": "adaptive_time_microseconds",
+
+        // Better decimal and numeric handling
+        "decimal.handling.mode": "string",
+        "bigint.unsigned.handling.mode": "long",
+
+        // Enhanced transforms for timestamp tracking
+        "transforms": "unwrap,addTimestamp",
+
+        // Original unwrap transform
         "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
         "transforms.unwrap.drop.tombstones": "false",
         "transforms.unwrap.delete.handling.mode": "rewrite",
+
+        // NEW: Add connector processing timestamp
+        "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
+        "transforms.addTimestamp.timestamp.field": "connector_processing_time",
+
+        // Kafka producer optimizations for latency tracking
+        "producer.override.compression.type": "gzip",
+        "producer.override.acks": "1",
+        "producer.override.batch.size": "1024",
+        "producer.override.linger.ms": "5",
+        "producer.override.request.timeout.ms": "10000",
+
+        // Binary log optimizations
+        "binlog.buffer.size": "32768",
+        "max.batch.size": "2048",
+        "max.queue.size": "8192",
+
+        // Snapshot and general settings
         "snapshot.mode": "initial",
         "snapshot.locking.mode": "none",
         "database.allowPublicKeyRetrieval": "true",
-        "decimal.handling.mode": "string",
-        "bigint.unsigned.handling.mode": "long",
-        "time.precision.mode": "adaptive_time_microseconds"
+
+        // Error handling
+        "errors.tolerance": "none",
+        "errors.log.enable": "true",
+        "errors.log.include.messages": "true"
       }
     };
   }
 
   async registerConnector(connectorConfig) {
     try {
-      console.log(`Registering connector: ${connectorConfig.name}`);
+      console.log(`Registering connector with enhanced timestamps: ${connectorConfig.name}`);
       console.log(`Target Database: ${connectorConfig.config['database.include.list']}`);
       console.log(`Target Tables: ${connectorConfig.config['table.include.list']}`);
       console.log(`Database Hostname: ${connectorConfig.config['database.hostname']}`);
+      console.log(`Timestamp Mode: ${connectorConfig.config['source.timestamp.mode']}`);
+      console.log(`Time Precision: ${connectorConfig.config['time.precision.mode']}`);
 
       try {
         await axios.delete(`${this.kafkaConnectUrl}/connectors/${connectorConfig.name}`);
@@ -154,7 +192,7 @@ class DynamicConnectorSetup {
         }
       );
 
-      console.log('Connector registered successfully!');
+      console.log('✓ Connector with enhanced timestamps registered successfully!');
 
       await new Promise(resolve => setTimeout(resolve, 3000));
       const statusResponse = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorConfig.name}/status`);
@@ -162,6 +200,9 @@ class DynamicConnectorSetup {
       console.log(`Connector Status: ${statusResponse.data.connector.state}`);
       if (statusResponse.data.tasks.length > 0) {
         console.log(`Task Status: ${statusResponse.data.tasks[0].state}`);
+        if (statusResponse.data.tasks[0].trace) {
+          console.log(`Task Error: ${statusResponse.data.tasks[0].trace}`);
+        }
       }
 
       return true;
@@ -176,7 +217,7 @@ class DynamicConnectorSetup {
   }
 
   async autoSetup() {
-    console.log('Auto-detecting ERPNext setup...');
+    console.log('Auto-detecting ERPNext setup with enhanced timestamp tracking...');
 
     const databases = await this.discoverERPNextDatabases();
 
@@ -193,8 +234,10 @@ class DynamicConnectorSetup {
     );
 
     if (existingTargetTables.length === 0) {
-      throw new Error(`No target tables found in ${database}`);
+      throw new Error(`No target tables found in ${database}. Available tables: ${availableTables.slice(0, 10).join(', ')}`);
     }
+
+    console.log(`Found target tables: ${existingTargetTables.join(', ')}`);
 
     const connectorConfig = this.createConnectorConfig(database, existingTargetTables);
     const success = await this.registerConnector(connectorConfig);
@@ -203,12 +246,56 @@ class DynamicConnectorSetup {
       throw new Error('Failed to register connector');
     }
 
+    console.log('\n=== Enhanced Timestamp Features Enabled ===');
+    console.log('✓ Transaction metadata tracking');
+    console.log('✓ Connector timestamp insertion');
+    console.log('✓ Microsecond precision timing');
+    console.log('✓ Optimized producer settings for latency');
+    console.log('✓ Enhanced binary log buffering');
+
     return {
       database,
       tables: existingTargetTables,
       connectorName: connectorConfig.name,
-      topics: existingTargetTables.map(table => `${this.topicPrefix}.${database}.${table}`)
+      topics: existingTargetTables.map(table => `${this.topicPrefix}.${database}.${table}`),
+      timestampFeatures: {
+        transactionMetadata: true,
+        connectorTimestamp: true,
+        microsecondPrecision: true,
+        optimizedLatency: true
+      }
     };
+  }
+
+  // Additional utility methods for monitoring
+  async listConnectors() {
+    try {
+      const response = await axios.get(`${this.kafkaConnectUrl}/connectors`);
+      return response.data;
+    } catch (error) {
+      console.error('Error listing connectors:', error.message);
+      return [];
+    }
+  }
+
+  async getConnectorStatus(connectorName) {
+    try {
+      const response = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorName}/status`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting status for ${connectorName}:`, error.message);
+      return null;
+    }
+  }
+
+  async getConnectorConfig(connectorName) {
+    try {
+      const response = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorName}/config`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error getting config for ${connectorName}:`, error.message);
+      return null;
+    }
   }
 }
 
