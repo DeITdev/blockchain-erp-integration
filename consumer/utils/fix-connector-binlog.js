@@ -12,8 +12,8 @@ const connectorConfig = {
     "database.password": "admin",
     "database.server.id": "184055", // Changed server ID to avoid conflicts
     "topic.prefix": "erpnext",
-    "database.include.list": "_0775ec53bab106f5",
-    "table.include.list": "_0775ec53bab106f5.tabEmployee,_0775ec53bab106f5.tabUser",
+    "database.include.list": "_a76baa702733b1ae",
+    "table.include.list": "_a76baa702733b1ae.tabEmployee,_a76baa702733b1ae.tabUser",
     "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
     "schema.history.internal.kafka.topic": "schema-changes.erpnext.multi",
     "schema.history.internal.consumer.security.protocol": "PLAINTEXT",

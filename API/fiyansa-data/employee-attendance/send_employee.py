@@ -19,17 +19,24 @@ from logging import StreamHandler
 
 
 def load_env_file():
-    env_path = Path(__file__).parent.parent / ".env"
-    if env_path.exists():
-        with open(env_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    os.environ[key] = value
-        print(f"Loaded environment variables from {env_path}")
-    else:
-        print(f".env file not found at {env_path}")
+    start_dir = Path(__file__).resolve().parent
+    for parent in [start_dir] + list(start_dir.parents):
+        env_file = parent / '.env'
+        if env_file.is_file():
+            try:
+                with env_file.open('r', encoding='utf-8-sig') as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line or line.startswith('#') or '=' not in line:
+                            continue
+                        k, v = line.split('=', 1)
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k and v and os.getenv(k) is None:
+                            os.environ[k] = v
+            except Exception:
+                pass
+            break
 
 
 load_env_file()
