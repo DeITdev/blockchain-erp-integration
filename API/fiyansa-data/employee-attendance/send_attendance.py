@@ -160,6 +160,8 @@ class AttendanceSyncManager:
         self.no_employee_count = 0
         self.employee_cache = {}
         self.missing_employees = []
+        self.start_time = None
+        self.processed_count = 0
 
     def get_employee(self, employee_name: str) -> Optional[Dict]:
         if employee_name in self.employee_cache:
@@ -173,7 +175,38 @@ class AttendanceSyncManager:
             self.missing_employees.append(employee_name)
         return None
 
+    def calculate_eta(self, current_idx: int, total: int) -> str:
+        """Calculate estimated time of arrival for completion"""
+        if current_idx == 0 or not self.start_time:
+            return "calculating..."
+
+        elapsed = time.time() - self.start_time
+        rate = current_idx / elapsed
+        remaining = total - current_idx
+        eta_seconds = remaining / rate if rate > 0 else 0
+
+        if eta_seconds < 60:
+            return f"{eta_seconds:.0f}s"
+        elif eta_seconds < 3600:
+            return f"{eta_seconds/60:.1f}m"
+        else:
+            return f"{eta_seconds/3600:.1f}h"
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """Get current performance statistics"""
+        if not self.start_time or self.processed_count == 0:
+            return {"elapsed": 0, "rate": 0}
+
+        elapsed = time.time() - self.start_time
+        rate = self.processed_count / elapsed if elapsed > 0 else 0
+
+        return {
+            "elapsed": elapsed,
+            "rate": rate
+        }
+
     def sync_attendance_record(self, record: Dict, idx: int, total: int) -> bool:
+        loop_start = time.time()
         try:
             user_name = record.get('user', '')
             attendance_date = record.get('date', '')
@@ -181,12 +214,22 @@ class AttendanceSyncManager:
 
             if not user_name or not attendance_date:
                 self.skipped_count += 1
-                print(f"[{idx}/{total}] Skipped: Missing user/date")
+                self.processed_count = idx
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total)
+                print(
+                    f"[{idx}/{total}] Skipped: Missing user/date | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
                 return False
 
             employee = self.get_employee(user_name)
             if not employee:
-                print(f"[{idx}/{total}] Skipped: {user_name} (employee not found)")
+                self.processed_count = idx
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total)
+                print(
+                    f"[{idx}/{total}] Skipped: {user_name} (employee not found) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
                 return False
 
             employee_id = employee['name']
@@ -201,16 +244,23 @@ class AttendanceSyncManager:
                         joining_date, "%Y-%m-%d").date()
                     if att_date < join_date:
                         self.skipped_count += 1
+                        self.processed_count = idx
+                        loop_time = time.time() - loop_start
+                        stats = self.get_performance_stats()
+                        eta = self.calculate_eta(idx, total)
                         print(
-                            f"[{idx}/{total}] Skipped: {user_name} ({attendance_date} < joining {joining_date})")
+                            f"[{idx}/{total}] Skipped: {user_name} ({attendance_date} < joining {joining_date}) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
                         return False
                 except Exception:
                     pass
 
             if self.erpnext_api.check_attendance_exists(employee_id, attendance_date):
                 self.skipped_count += 1
-                print(
-                    f"[{idx}/{total}] Skipped: {user_name} ({attendance_date} already exists)")
+                self.processed_count = idx
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total)
+                print(f"[{idx}/{total}] Skipped: {user_name} ({attendance_date} already exists) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
                 return True
 
             attendance_data = {
@@ -227,12 +277,19 @@ class AttendanceSyncManager:
 
             self.erpnext_api.create_doc("Attendance", attendance_data)
             self.synced_count += 1
-            print(f"[{idx}/{total}] Synced: {user_name} {attendance_date}")
+            self.processed_count = idx
+            loop_time = time.time() - loop_start
+            stats = self.get_performance_stats()
+            eta = self.calculate_eta(idx, total)
+            print(f"[{idx}/{total}] Synced: {user_name} {attendance_date} | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
             return True
         except Exception as e:
             self.failed_count += 1
-            print(
-                f"[{idx}/{total}] Failed: {record.get('user', '')} {record.get('date', '')} ({e})")
+            self.processed_count = idx
+            loop_time = time.time() - loop_start
+            stats = self.get_performance_stats()
+            eta = self.calculate_eta(idx, total)
+            print(f"[{idx}/{total}] Failed: {record.get('user', '')} {record.get('date', '')} ({e}) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
             return False
 
     def sync_all_attendance(self, limit: int = DEFAULT_LIMIT):
@@ -240,10 +297,25 @@ class AttendanceSyncManager:
         if not attendance_records:
             return
 
+        # Initialize timing
+        self.start_time = time.time()
         total = len(attendance_records)
+        print(f"Processing {total} attendance records...")
+
         for idx, record in enumerate(attendance_records, 1):
             self.sync_attendance_record(record, idx, total)
             time.sleep(0.05)
+
+        # Final performance summary
+        if self.start_time:
+            total_time = time.time() - self.start_time
+            final_rate = total / total_time if total_time > 0 else 0
+
+            print(f"\n=== PERFORMANCE SUMMARY ===")
+            print(
+                f"Total Time: {total_time:.2f} seconds ({total_time/60:.1f} minutes)")
+            print(f"Average Rate: {final_rate:.2f} records/second")
+            print(f"Total Records: {total}")
 
         print("Successfully Synced:", self.synced_count)
         print("Skipped:", self.skipped_count)

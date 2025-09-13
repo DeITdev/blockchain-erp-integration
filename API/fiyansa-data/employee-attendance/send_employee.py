@@ -16,6 +16,7 @@ from faker import Faker
 from typing import Dict, List, Optional
 import sys
 from logging import StreamHandler
+import time
 
 
 def load_env_file():
@@ -157,6 +158,8 @@ class EmployeeCreator:
         self.fake = Faker("id_ID")
         self.erpnext_api = ERPNextAPI()
         self.external_api = ExternalAPIClient(limit)
+        self.start_time = None
+        self.processed_count = 0
 
     def generate_random_dob(self) -> str:
         return fake.date_of_birth(minimum_age=20, maximum_age=40).strftime("%Y-%m-%d")
@@ -174,6 +177,36 @@ class EmployeeCreator:
             return parsed.strftime("%Y-%m-%d")
         except Exception:
             return datetime.now().strftime("%Y-%m-%d")
+
+    def calculate_eta(self, current_idx: int, total: int) -> str:
+        """Calculate estimated time of arrival for completion"""
+        if current_idx == 0 or not self.start_time:
+            return "calculating..."
+
+        elapsed = time.time() - self.start_time
+        rate = current_idx / elapsed
+        remaining = total - current_idx
+        eta_seconds = remaining / rate if rate > 0 else 0
+
+        if eta_seconds < 60:
+            return f"{eta_seconds:.0f}s"
+        elif eta_seconds < 3600:
+            return f"{eta_seconds/60:.1f}m"
+        else:
+            return f"{eta_seconds/3600:.1f}h"
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """Get current performance statistics"""
+        if not self.start_time or self.processed_count == 0:
+            return {"elapsed": 0, "rate": 0}
+
+        elapsed = time.time() - self.start_time
+        rate = self.processed_count / elapsed if elapsed > 0 else 0
+
+        return {
+            "elapsed": elapsed,
+            "rate": rate
+        }
 
     def create_employees_from_api(self):
         users = self.external_api.fetch_users()
@@ -193,7 +226,31 @@ class EmployeeCreator:
         employees_skipped_count = 0
         employees_failed_count = 0
 
+    def create_employees_from_api(self):
+        users = self.external_api.fetch_users()
+        if not users:
+            return
+
+        existing_employees = self.erpnext_api.get_list(
+            "Employee", filters={"company": COMPANY_NAME}, fields=["personal_email"]
+        )
+        existing_emails = {
+            emp.get("personal_email")
+            for emp in existing_employees
+            if emp.get("personal_email")
+        }
+
+        employees_created_count = 0
+        employees_skipped_count = 0
+        employees_failed_count = 0
+
+        # Initialize timing
+        self.start_time = time.time()
+        total_users = len(users)
+        print(f"Processing {total_users} users...")
+
         for idx, user in enumerate(users, 1):
+            loop_start = time.time()
             try:
                 name = (user.get("name") or "").strip()
                 email = (user.get("email") or "").strip()
@@ -203,13 +260,20 @@ class EmployeeCreator:
 
                 if not name or not email:
                     employees_skipped_count += 1
-                    print(f"[{idx}/{len(users)}] Skipped: Missing name/email")
+                    self.processed_count = idx
+                    stats = self.get_performance_stats()
+                    eta = self.calculate_eta(idx, total_users)
+                    print(
+                        f"[{idx}/{total_users}] Skipped: Missing name/email | Rate: {stats['rate']:.1f}/s | ETA: {eta}")
                     continue
 
                 if email in existing_emails or self.erpnext_api.check_exists("Employee", email):
                     employees_skipped_count += 1
+                    self.processed_count = idx
+                    stats = self.get_performance_stats()
+                    eta = self.calculate_eta(idx, total_users)
                     print(
-                        f"[{idx}/{len(users)}] Skipped: {name} (already exists)")
+                        f"[{idx}/{total_users}] Skipped: {name} (already exists) | Rate: {stats['rate']:.1f}/s | ETA: {eta}")
                     continue
 
                 date_of_birth = self.generate_random_dob()
@@ -231,12 +295,33 @@ class EmployeeCreator:
 
                 self.erpnext_api.create_doc("Employee", employee_data)
                 employees_created_count += 1
-                print(f"[{idx}/{len(users)}] Created: {name}")
+                self.processed_count = idx
+
+                # Calculate performance metrics
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total_users)
+                print(
+                    f"[{idx}/{total_users}] Created: {name} | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.2f}s | ETA: {eta}")
 
             except Exception as e:
                 employees_failed_count += 1
-                print(f"[{idx}/{len(users)}] Failed: {name} ({e})")
+                self.processed_count = idx
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total_users)
+                print(
+                    f"[{idx}/{total_users}] Failed: {name} ({e}) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.2f}s | ETA: {eta}")
 
+        # Final performance summary
+        final_stats = self.get_performance_stats()
+        total_time = final_stats['elapsed']
+
+        print(f"\n=== PERFORMANCE SUMMARY ===")
+        print(
+            f"Total Time: {total_time:.2f} seconds ({total_time/60:.1f} minutes)")
+        print(f"Average Rate: {final_stats['rate']:.2f} records/second")
+        print(f"Total Records: {total_users}")
         print("Employees Created:", employees_created_count)
         print("Employees Skipped:", employees_skipped_count)
         print("Employees Failed:", employees_failed_count)

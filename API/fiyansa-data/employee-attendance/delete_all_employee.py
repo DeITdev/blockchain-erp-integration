@@ -112,6 +112,8 @@ class EmployeeDeletor:
         self.failed_count = 0
         self.related_data_deleted = {
             "attendance": 0, "employee_checkins": 0, "leave_applications": 0}
+        self.start_time = None
+        self.processed_count = 0
 
     def get_all_employees(self):
         try:
@@ -120,6 +122,36 @@ class EmployeeDeletor:
             return [emp for emp in all_employees if emp.get("company") == Config.COMPANY_NAME]
         except Exception:
             return []
+
+    def calculate_eta(self, current_idx: int, total: int) -> str:
+        """Calculate estimated time of arrival for completion"""
+        if current_idx == 0 or not self.start_time:
+            return "calculating..."
+
+        elapsed = time.time() - self.start_time
+        rate = current_idx / elapsed
+        remaining = total - current_idx
+        eta_seconds = remaining / rate if rate > 0 else 0
+
+        if eta_seconds < 60:
+            return f"{eta_seconds:.0f}s"
+        elif eta_seconds < 3600:
+            return f"{eta_seconds/60:.1f}m"
+        else:
+            return f"{eta_seconds/3600:.1f}h"
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """Get current performance statistics"""
+        if not self.start_time or self.processed_count == 0:
+            return {"elapsed": 0, "rate": 0}
+
+        elapsed = time.time() - self.start_time
+        rate = self.processed_count / elapsed if elapsed > 0 else 0
+
+        return {
+            "elapsed": elapsed,
+            "rate": rate
+        }
 
     def delete_basic_related_data(self, employee_id: str):
         basic_doctypes = [
@@ -141,18 +173,35 @@ class EmployeeDeletor:
                 pass
 
     def delete_employees(self, employees_to_delete):
+        # Initialize timing
+        self.start_time = time.time()
+        total_employees = len(employees_to_delete)
+        print(f"Processing {total_employees} employees...")
+
         for idx, emp in enumerate(employees_to_delete, 1):
+            loop_start = time.time()
             emp_id = emp.get("name")
             emp_name = emp.get("employee_name", "Unknown")
             try:
                 self.delete_basic_related_data(emp_id)
                 self.api.delete_doc("Employee", emp_id)
                 self.deleted_count += 1
-                print(f"[{idx}/{len(employees_to_delete)}] Deleted: {emp_name}")
+                self.processed_count = idx
+
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total_employees)
+                print(
+                    f"[{idx}/{total_employees}] Deleted: {emp_name} | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.2f}s | ETA: {eta}")
             except Exception as e:
                 self.failed_count += 1
-                print(
-                    f"[{idx}/{len(employees_to_delete)}] Failed: {emp_name} ({str(e)[:50]})")
+                self.processed_count = idx
+
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total_employees)
+                print(f"[{idx}/{total_employees}] Failed: {emp_name} ({str(e)[:50]}) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.2f}s | ETA: {eta}")
+
         return self.deleted_count, self.failed_count
 
     def run(self):
@@ -169,6 +218,17 @@ class EmployeeDeletor:
             return
 
         deleted_count, failed_count = self.delete_employees(employees)
+
+        # Final performance summary
+        if self.start_time:
+            total_time = time.time() - self.start_time
+            final_rate = len(employees) / total_time if total_time > 0 else 0
+
+            print(f"\n=== PERFORMANCE SUMMARY ===")
+            print(
+                f"Total Time: {total_time:.2f} seconds ({total_time/60:.1f} minutes)")
+            print(f"Average Rate: {final_rate:.2f} employees/second")
+            print(f"Total Employees: {len(employees)}")
 
         print("\nSummary:")
         print("Employees Deleted:", deleted_count)

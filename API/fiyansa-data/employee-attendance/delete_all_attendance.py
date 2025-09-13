@@ -117,6 +117,8 @@ class AttendanceDeletor:
         self.api = ERPNextAPI()
         self.deleted_count = 0
         self.failed_count = 0
+        self.start_time = None
+        self.processed_count = 0
 
     def get_all_attendance(self) -> List[Dict]:
         """Fetch all attendance records using pagination"""
@@ -137,9 +139,44 @@ class AttendanceDeletor:
             start += Config.PAGE_LIMIT
         return all_records
 
+    def calculate_eta(self, current_idx: int, total: int) -> str:
+        """Calculate estimated time of arrival for completion"""
+        if current_idx == 0 or not self.start_time:
+            return "calculating..."
+
+        elapsed = time.time() - self.start_time
+        rate = current_idx / elapsed
+        remaining = total - current_idx
+        eta_seconds = remaining / rate if rate > 0 else 0
+
+        if eta_seconds < 60:
+            return f"{eta_seconds:.0f}s"
+        elif eta_seconds < 3600:
+            return f"{eta_seconds/60:.1f}m"
+        else:
+            return f"{eta_seconds/3600:.1f}h"
+
+    def get_performance_stats(self) -> Dict[str, float]:
+        """Get current performance statistics"""
+        if not self.start_time or self.processed_count == 0:
+            return {"elapsed": 0, "rate": 0}
+
+        elapsed = time.time() - self.start_time
+        rate = self.processed_count / elapsed if elapsed > 0 else 0
+
+        return {
+            "elapsed": elapsed,
+            "rate": rate
+        }
+
     def delete_attendance(self, attendance_records: List[Dict]):
+        # Initialize timing
+        self.start_time = time.time()
         total = len(attendance_records)
+        print(f"Processing {total} attendance records...")
+
         for idx, record in enumerate(attendance_records, 1):
+            loop_start = time.time()
             att_id = record.get("name")
             emp_name = record.get("employee_name", "Unknown")
             att_date = record.get("attendance_date", "Unknown")
@@ -149,11 +186,21 @@ class AttendanceDeletor:
                     self.api.cancel_doc("Attendance", att_id)
                 self.api.delete_doc("Attendance", att_id)
                 self.deleted_count += 1
-                print(f"[{idx}/{total}] Deleted: {emp_name} on {att_date}")
+                self.processed_count = idx
+
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total)
+                print(
+                    f"[{idx}/{total}] Deleted: {emp_name} on {att_date} | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
             except Exception as e:
                 self.failed_count += 1
-                print(
-                    f"[{idx}/{total}] Failed: {emp_name} on {att_date} ({str(e)[:50]})")
+                self.processed_count = idx
+
+                loop_time = time.time() - loop_start
+                stats = self.get_performance_stats()
+                eta = self.calculate_eta(idx, total)
+                print(f"[{idx}/{total}] Failed: {emp_name} on {att_date} ({str(e)[:50]}) | Rate: {stats['rate']:.1f}/s | Loop: {loop_time:.3f}s | ETA: {eta}")
 
         return self.deleted_count, self.failed_count
 
@@ -165,6 +212,17 @@ class AttendanceDeletor:
             return
 
         deleted, failed = self.delete_attendance(records)
+
+        # Final performance summary
+        if self.start_time:
+            total_time = time.time() - self.start_time
+            final_rate = len(records) / total_time if total_time > 0 else 0
+
+            print(f"\n=== PERFORMANCE SUMMARY ===")
+            print(
+                f"Total Time: {total_time:.2f} seconds ({total_time/60:.1f} minutes)")
+            print(f"Average Rate: {final_rate:.2f} attendance/second")
+            print(f"Total Records: {len(records)}")
 
         print("\nSummary:")
         print("Attendance Deleted:", deleted)
