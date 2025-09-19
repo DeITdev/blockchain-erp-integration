@@ -18,12 +18,19 @@ const ERPNEXT_TIMEZONE_OFFSET_MS = 7 * 60 * 60 * 1000; // 7 hours in millisecond
 const DEDUP_WINDOW_MS = 10000; // 10 seconds window for deduplication
 const recentRecords = new Map(); // Store recent records with timestamps
 
+// OPTIMIZED: Batch processing settings
+const BATCH_SIZE = parseInt(process.env.BATCH_SIZE) || 10; // Process messages in batches
+const BATCH_TIMEOUT = parseInt(process.env.BATCH_TIMEOUT) || 100; // Max wait time for batch
+const MAX_CONCURRENT_REQUESTS = parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 5; // Parallel blockchain requests
+
 // Statistics
 let eventCounter = 0;
 let processed = 0;
 let errors = 0;
 let skipped = 0;
 let connected = false;
+let batchesProcessed = 0;
+let totalBatchTime = 0;
 
 // Enhanced Latency tracking for all components
 let latencyStats = {
@@ -48,23 +55,32 @@ let latencyStats = {
   maxTotalSystem: 0
 };
 
-// Kafka setup
+// OPTIMIZED: High-performance Kafka setup
 const kafka = new Kafka({
   clientId: 'blockchain-consumer',
   brokers: [KAFKA_BROKER],
-  retry: { initialRetryTime: 1000, retries: 8 },
+  retry: {
+    initialRetryTime: 100, // Faster retries
+    retries: 3, // Fewer retries for speed
+    maxRetryTime: 30000
+  },
   connectionTimeout: 3000,
   requestTimeout: 30000
 });
 
+// OPTIMIZED: High-throughput consumer configuration
 const consumer = kafka.consumer({
   groupId: 'blockchain-consumer-group',
   sessionTimeout: 30000,
   heartbeatInterval: 3000,
-  maxBytesPerPartition: 1048576,
-  minBytes: 1,
-  maxBytes: 10485760,
-  maxWaitTimeInMs: 5000
+  // OPTIMIZED: Fetch more data per request
+  maxBytesPerPartition: 10485760, // 10MB per partition
+  minBytes: 1024, // Wait for at least 1KB
+  maxBytes: 52428800, // 50MB total
+  maxWaitTimeInMs: 1000, // Reduced wait time
+  // OPTIMIZED: Commit offsets less frequently for performance
+  autoCommitInterval: 5000
+  // Removed the problematic partitionAssigners line
 });
 
 // API endpoints mapping
@@ -75,6 +91,41 @@ const ENDPOINTS = {
   tabTask: '/tasks',
   tabCompany: '/companies'
 };
+
+// OPTIMIZED: Concurrent request limiter
+class ConcurrencyLimiter {
+  constructor(maxConcurrent) {
+    this.maxConcurrent = maxConcurrent;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  async execute(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject });
+      this.tryNext();
+    });
+  }
+
+  tryNext() {
+    if (this.running >= this.maxConcurrent || this.queue.length === 0) {
+      return;
+    }
+
+    const { fn, resolve, reject } = this.queue.shift();
+    this.running++;
+
+    fn()
+      .then(resolve)
+      .catch(reject)
+      .finally(() => {
+        this.running--;
+        this.tryNext();
+      });
+  }
+}
+
+const concurrencyLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_REQUESTS);
 
 // Update comprehensive latency statistics
 function updateLatencyStats(erpnextToKafka, kafkaToConsumer, consumerProcessing, consumerToBlockchain) {
@@ -130,7 +181,9 @@ function getLatencyAverages() {
     maxTotalCDC: latencyStats.maxTotalCDC,
     minTotalSystem: latencyStats.minTotalSystem === Infinity ? 0 : latencyStats.minTotalSystem,
     maxTotalSystem: latencyStats.maxTotalSystem,
-    totalEvents: count
+    totalEvents: count,
+    avgBatchTime: batchesProcessed > 0 ? Math.round(totalBatchTime / batchesProcessed) : 0,
+    totalBatches: batchesProcessed
   };
 }
 
@@ -247,50 +300,94 @@ function transformData(table, data) {
   };
 }
 
-// Send to blockchain
+// OPTIMIZED: Send to blockchain with concurrency control
 async function sendToBlockchain(table, transformedData) {
-  const blockchainStartTime = Date.now();
+  return concurrencyLimiter.execute(async () => {
+    const blockchainStartTime = Date.now();
 
-  const endpoint = ENDPOINTS[table];
-  if (!endpoint) {
-    console.log(`WARNING: No endpoint for ${table}`);
-    return { success: false, latency: 0 };
-  }
+    const endpoint = ENDPOINTS[table];
+    if (!endpoint) {
+      console.log(`WARNING: No endpoint for ${table}`);
+      return { success: false, latency: 0 };
+    }
 
-  const { optimization, ...payload } = transformedData;
-  const fullPayload = { privateKey: PRIVATE_KEY, ...payload };
+    const { optimization, ...payload } = transformedData;
+    const fullPayload = { privateKey: PRIVATE_KEY, ...payload };
 
-  try {
-    const recordId = Object.values(payload)[0]?.recordId;
-    console.log(`Sending ${table} (${optimization.reductionPercent}% optimized: ${optimization.originalSize} -> ${optimization.filteredSize} chars)`);
+    try {
+      const recordId = Object.values(payload)[0]?.recordId;
 
-    const response = await axios.post(`${API_ENDPOINT}${endpoint}`, fullPayload, {
-      timeout: 15000,
-      headers: { 'Content-Type': 'application/json' }
-    });
+      const response = await axios.post(`${API_ENDPOINT}${endpoint}`, fullPayload, {
+        timeout: 10000, // Reduced timeout for faster failures
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-    const blockchainLatency = Date.now() - blockchainStartTime;
+      const blockchainLatency = Date.now() - blockchainStartTime;
 
-    if (response.data.success) {
-      const blockNumber = response.data.blockchain?.blockNumber || response.data.blockNumber;
-      const txHash = response.data.blockchain?.transactionHash || response.data.transactionHash;
-      console.log(`SUCCESS: ${table} ${recordId} -> Block ${blockNumber} (${txHash?.slice(0, 10)}...)`);
-      return { success: true, latency: blockchainLatency };
-    } else {
-      console.log(`ERROR: API failed for ${table} - ${JSON.stringify(response.data)}`);
+      if (response.data.success) {
+        const blockNumber = response.data.blockchain?.blockNumber || response.data.blockNumber;
+        const txHash = response.data.blockchain?.transactionHash || response.data.transactionHash;
+        console.log(`SUCCESS: ${table} ${recordId} -> Block ${blockNumber} (${txHash?.slice(0, 10)}...) [${blockchainLatency}ms]`);
+        return { success: true, latency: blockchainLatency };
+      } else {
+        console.log(`ERROR: API failed for ${table} - ${JSON.stringify(response.data)}`);
+        return { success: false, latency: blockchainLatency };
+      }
+    } catch (error) {
+      const blockchainLatency = Date.now() - blockchainStartTime;
+      const errorMsg = error.response?.data?.error || error.message;
+      console.log(`ERROR: ${table} blockchain call failed - ${errorMsg}`);
       return { success: false, latency: blockchainLatency };
     }
-  } catch (error) {
-    const blockchainLatency = Date.now() - blockchainStartTime;
-    const errorMsg = error.response?.data?.error || error.message;
-    console.log(`ERROR: ${table} blockchain call failed - ${errorMsg}`);
-    return { success: false, latency: blockchainLatency };
+  });
+}
+
+// OPTIMIZED: Batch message processing
+const messageQueue = [];
+let batchTimeout = null;
+
+async function processBatch() {
+  if (messageQueue.length === 0) return;
+
+  const batchStartTime = Date.now();
+  const batch = messageQueue.splice(0, BATCH_SIZE);
+
+  console.log(`\n=== Processing batch of ${batch.length} messages ===`);
+
+  // Process messages in parallel
+  const promises = batch.map(({ topic, message, consumerReceiveTime }) =>
+    processMessage(topic, message, consumerReceiveTime)
+  );
+
+  await Promise.allSettled(promises);
+
+  const batchTime = Date.now() - batchStartTime;
+  batchesProcessed++;
+  totalBatchTime += batchTime;
+
+  console.log(`=== Batch completed in ${batchTime}ms (avg: ${Math.round(batchTime / batch.length)}ms/message) ===\n`);
+}
+
+async function queueMessage(topic, message) {
+  const consumerReceiveTime = Date.now();
+  messageQueue.push({ topic, message, consumerReceiveTime });
+
+  // Clear existing timeout
+  if (batchTimeout) {
+    clearTimeout(batchTimeout);
+  }
+
+  // Process immediately if batch is full
+  if (messageQueue.length >= BATCH_SIZE) {
+    await processBatch();
+  } else {
+    // Set timeout for partial batch
+    batchTimeout = setTimeout(processBatch, BATCH_TIMEOUT);
   }
 }
 
-// Process CDC message
-async function processMessage(topic, message) {
-  const consumerReceiveTime = Date.now();
+// Process CDC message (now called from batch processor)
+async function processMessage(topic, message, consumerReceiveTime) {
   const kafkaMessageTimestamp = parseInt(message.timestamp);
 
   try {
@@ -319,9 +416,7 @@ async function processMessage(topic, message) {
       changeData = changeEvent.payload.after || changeEvent.payload.before;
       if (changeEvent.payload.op === 'd') {
         eventCounter++;
-        console.log(`\nEvent #${eventCounter}`);
-        console.log(`${tableName} ${changeData?.name || 'unknown'} DELETE`);
-        console.log(`SKIP: Delete operations not sent to blockchain\n`);
+        console.log(`Event #${eventCounter}: ${tableName} DELETE - SKIPPED`);
         return;
       }
     } else {
@@ -335,9 +430,7 @@ async function processMessage(topic, message) {
 
     if (changeData.__deleted === 'true' || changeData.__deleted === true) {
       eventCounter++;
-      console.log(`\nEvent #${eventCounter}`);
-      console.log(`${tableName} ${changeData.name} DELETE`);
-      console.log(`SKIP: Deleted records not sent to blockchain\n`);
+      console.log(`Event #${eventCounter}: ${tableName} ${changeData.name} DELETE - SKIPPED`);
       return;
     }
 
@@ -347,18 +440,15 @@ async function processMessage(topic, message) {
     const dupCheck = shouldSkipDuplicate(changeData.name, modifiedTimestamp);
     if (dupCheck.shouldSkip) {
       eventCounter++;
-      console.log(`\nEvent #${eventCounter}`);
-      console.log(`${tableName} ${changeData.name} ${operation}`);
-      console.log(`SKIP: Duplicate event (within ${dupCheck.timeDiff}ms of previous)\n`);
+      console.log(`Event #${eventCounter}: ${tableName} ${changeData.name} ${operation} - DUPLICATE (${dupCheck.timeDiff}ms)`);
       skipped++;
       return;
     }
 
     eventCounter++;
-    console.log(`\nEvent #${eventCounter}`);
-    console.log(`${tableName} ${changeData.name} ${operation}`);
+    console.log(`Event #${eventCounter}: ${tableName} ${changeData.name} ${operation}`);
 
-    // Start consumer processing timer HERE - before any processing logic
+    // Start consumer processing timer
     const processingStartTime = Date.now();
 
     // Get ERPNext event time with timezone correction
@@ -374,13 +464,11 @@ async function processMessage(topic, message) {
     const erpnextToKafkaLatency = Math.max(0, kafkaMessageTimestamp - erpnextEventTime);
     const kafkaToConsumerLatency = consumerReceiveTime - kafkaMessageTimestamp;
 
-    // Transform data (part of consumer processing)
+    // Transform data
     const transformedData = transformData(tableName, changeData);
-
-    // End consumer processing timer HERE - after all processing is done
     const consumerProcessingLatency = Date.now() - processingStartTime;
 
-    // Send to blockchain
+    // Send to blockchain (now with concurrency control)
     const blockchainResult = await sendToBlockchain(tableName, transformedData);
     const consumerToBlockchainLatency = blockchainResult.latency;
 
@@ -388,15 +476,8 @@ async function processMessage(topic, message) {
     const totalCDCLatency = erpnextToKafkaLatency + kafkaToConsumerLatency + consumerProcessingLatency;
     const totalSystemLatency = totalCDCLatency + consumerToBlockchainLatency;
 
-    // Display latency breakdown
-    console.log(`\n--- Enhanced Latency Breakdown ---`);
-    console.log(`1. ERPNext DB to Kafka:      ${erpnextToKafkaLatency}ms`);
-    console.log(`2. Kafka to Consumer:        ${kafkaToConsumerLatency}ms`);
-    console.log(`3. Consumer Processing:      ${consumerProcessingLatency}ms`);
-    console.log(`4. Consumer to Blockchain:   ${consumerToBlockchainLatency}ms`);
-    console.log(`--- Aggregated Metrics ---`);
-    console.log(`Total CDC Latency:           ${totalCDCLatency}ms (1+2+3)`);
-    console.log(`Total System Latency:       ${totalSystemLatency}ms (1+2+3+4)`);
+    // Compact latency display
+    console.log(`  Latency: DB→Kafka ${erpnextToKafkaLatency}ms | Kafka→Consumer ${kafkaToConsumerLatency}ms | Processing ${consumerProcessingLatency}ms | Blockchain ${consumerToBlockchainLatency}ms | Total ${totalSystemLatency}ms`);
 
     // Update statistics
     if (blockchainResult.success) {
@@ -406,8 +487,6 @@ async function processMessage(topic, message) {
       errors++;
       updateLatencyStats(erpnextToKafkaLatency, kafkaToConsumerLatency, consumerProcessingLatency, consumerToBlockchainLatency);
     }
-
-    console.log('');
 
   } catch (error) {
     console.log(`ERROR: Processing failed for topic ${topic} - ${error.message}`);
@@ -442,13 +521,14 @@ async function discoverTopics() {
 
 // Main function
 async function start() {
-  console.log('Starting Enhanced Blockchain-ERP Integration Consumer...');
+  console.log('Starting OPTIMIZED Blockchain-ERP Integration Consumer...');
   console.log(`Kafka: ${KAFKA_BROKER}`);
   console.log(`API: ${API_ENDPOINT}`);
   console.log(`Database: ${DB_NAME}`);
   console.log(`Tables: ${TARGET_TABLES.join(', ')}`);
   console.log(`ERPNext Timezone Offset: +${ERPNEXT_TIMEZONE_OFFSET_MS / 1000 / 60 / 60} hours`);
   console.log(`Deduplication Window: ${DEDUP_WINDOW_MS}ms`);
+  console.log(`OPTIMIZATIONS: Batch Size: ${BATCH_SIZE}, Max Concurrent: ${MAX_CONCURRENT_REQUESTS}, Batch Timeout: ${BATCH_TIMEOUT}ms`);
 
   try {
     const response = await axios.get(API_ENDPOINT, { timeout: 5000 });
@@ -478,32 +558,35 @@ async function start() {
     console.log(`Subscribed to: ${availableTopics.join(', ')}`);
   }
 
+  // OPTIMIZED: Use batch processing instead of individual message processing
   await consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
-      await processMessage(topic, message);
+      await queueMessage(topic, message);
     },
   });
 
-  console.log('Consumer ready with enhanced latency tracking...\n');
+  console.log('OPTIMIZED Consumer ready with enhanced batch processing and concurrency control...\n');
 
-  // Enhanced stats every 60 seconds
+  // Enhanced stats every 30 seconds (more frequent for optimization monitoring)
   setInterval(() => {
     if (processed > 0 || errors > 0 || skipped > 0) {
-      console.log(`\n===== COMPREHENSIVE PERFORMANCE REPORT =====`);
+      console.log(`\n===== OPTIMIZED PERFORMANCE REPORT =====`);
       console.log(`Events: ${eventCounter} total, ${processed} processed, ${errors} errors, ${skipped} skipped`);
       console.log(`Success Rate: ${processed > 0 ? Math.round((processed / (processed + errors)) * 100) : 0}%`);
+      console.log(`Queue Size: ${messageQueue.length} pending messages`);
 
       const avgLatency = getLatencyAverages();
       if (avgLatency) {
-        console.log(`\n--- Enhanced Latency Stats (${avgLatency.totalEvents} events) ---`);
+        console.log(`\n--- OPTIMIZED Latency Stats (${avgLatency.totalEvents} events, ${avgLatency.totalBatches} batches) ---`);
         console.log(`1. ERPNext DB to Kafka:     avg ${avgLatency.avgERPNextToKafka}ms (${avgLatency.minERPNextToKafka}-${avgLatency.maxERPNextToKafka}ms)`);
         console.log(`2. Kafka to Consumer:       avg ${avgLatency.avgKafkaToConsumer}ms (${avgLatency.minKafkaToConsumer}-${avgLatency.maxKafkaToConsumer}ms)`);
         console.log(`3. Consumer Processing:     avg ${avgLatency.avgConsumerProcessing}ms (${avgLatency.minConsumerProcessing}-${avgLatency.maxConsumerProcessing}ms)`);
         console.log(`4. Consumer to Blockchain:  avg ${avgLatency.avgConsumerToBlockchain}ms (${avgLatency.minConsumerToBlockchain}-${avgLatency.maxConsumerToBlockchain}ms)`);
 
-        console.log(`\n--- Aggregated Metrics ---`);
-        console.log(`Total CDC (1+2+3):          avg ${avgLatency.avgTotalCDC}ms (${avgLatency.minTotalCDC}-${avgLatency.maxTotalCDC}ms)`);
-        console.log(`Total System (1+2+3+4):     avg ${avgLatency.avgTotalSystem}ms (${avgLatency.minTotalSystem}-${avgLatency.maxTotalSystem}ms)`);
+        console.log(`\n--- Optimization Metrics ---`);
+        console.log(`Average Batch Processing Time: ${avgLatency.avgBatchTime}ms`);
+        console.log(`Total CDC (1+2+3):             avg ${avgLatency.avgTotalCDC}ms (${avgLatency.minTotalCDC}-${avgLatency.maxTotalCDC}ms)`);
+        console.log(`Total System (1+2+3+4):        avg ${avgLatency.avgTotalSystem}ms (${avgLatency.minTotalSystem}-${avgLatency.maxTotalSystem}ms)`);
 
         const bottleneck = [
           { name: 'ERPNext to Kafka', value: avgLatency.avgERPNextToKafka },
@@ -516,15 +599,24 @@ async function start() {
         console.log(`Primary Bottleneck: ${bottleneck.name} (${bottleneck.value}ms avg)`);
         console.log(`CDC Efficiency: ${Math.round((avgLatency.avgTotalCDC / avgLatency.avgTotalSystem) * 100)}% of total time`);
         console.log(`Blockchain Impact: ${Math.round((avgLatency.avgConsumerToBlockchain / avgLatency.avgTotalSystem) * 100)}% of total time`);
+        console.log(`Throughput: ${Math.round(avgLatency.totalEvents / (Date.now() - startTime) * 1000)} events/sec`);
       }
-      console.log('=============================================\n');
+      console.log('==========================================\n');
     }
-  }, 60000);
+  }, 30000);
 }
+
+const startTime = Date.now();
 
 // Shutdown handler
 async function shutdown() {
-  console.log('\nShutting down...');
+  console.log('\nShutting down optimized consumer...');
+
+  // Process remaining messages in queue
+  if (messageQueue.length > 0) {
+    console.log(`Processing ${messageQueue.length} remaining messages...`);
+    await processBatch();
+  }
 
   if (connected) {
     try {
@@ -535,24 +627,26 @@ async function shutdown() {
     }
   }
 
-  console.log(`\n===== FINAL COMPREHENSIVE REPORT =====`);
+  console.log(`\n===== FINAL OPTIMIZED REPORT =====`);
   console.log(`Total Events: ${eventCounter}`);
   console.log(`Processed: ${processed}`);
   console.log(`Errors: ${errors}`);
   console.log(`Skipped: ${skipped}`);
   console.log(`Final Success Rate: ${processed > 0 ? Math.round((processed / (processed + errors)) * 100) : 0}%`);
+  console.log(`Total Runtime: ${Math.round((Date.now() - startTime) / 1000)}s`);
 
   const avgLatency = getLatencyAverages();
   if (avgLatency) {
-    console.log(`\n--- Final Latency Summary (${avgLatency.totalEvents} events) ---`);
+    console.log(`\n--- Final Optimized Latency Summary (${avgLatency.totalEvents} events) ---`);
     console.log(`1. ERPNext DB to Kafka:     avg ${avgLatency.avgERPNextToKafka}ms (${avgLatency.minERPNextToKafka}-${avgLatency.maxERPNextToKafka}ms)`);
     console.log(`2. Kafka to Consumer:       avg ${avgLatency.avgKafkaToConsumer}ms (${avgLatency.minKafkaToConsumer}-${avgLatency.maxKafkaToConsumer}ms)`);
     console.log(`3. Consumer Processing:     avg ${avgLatency.avgConsumerProcessing}ms (${avgLatency.minConsumerProcessing}-${avgLatency.maxConsumerProcessing}ms)`);
     console.log(`4. Consumer to Blockchain:  avg ${avgLatency.avgConsumerToBlockchain}ms (${avgLatency.minConsumerToBlockchain}-${avgLatency.maxConsumerToBlockchain}ms)`);
 
-    console.log(`\n--- Final Aggregated Metrics ---`);
-    console.log(`Total CDC (1+2+3):          avg ${avgLatency.avgTotalCDC}ms (${avgLatency.minTotalCDC}-${avgLatency.maxTotalCDC}ms)`);
-    console.log(`Total System (1+2+3+4):     avg ${avgLatency.avgTotalSystem}ms (${avgLatency.minTotalSystem}-${avgLatency.maxTotalSystem}ms)`);
+    console.log(`\n--- Final Optimization Results ---`);
+    console.log(`Average Batch Processing Time: ${avgLatency.avgBatchTime}ms`);
+    console.log(`Total Batches Processed: ${avgLatency.totalBatches}`);
+    console.log(`Final Throughput: ${Math.round(avgLatency.totalEvents / (Date.now() - startTime) * 1000)} events/sec`);
 
     const bottleneck = [
       { name: 'ERPNext to Kafka', value: avgLatency.avgERPNextToKafka },
@@ -561,14 +655,11 @@ async function shutdown() {
       { name: 'Consumer to Blockchain', value: avgLatency.avgConsumerToBlockchain }
     ].sort((a, b) => b.value - a.value)[0];
 
-    console.log(`\n--- Final Performance Analysis ---`);
     console.log(`Primary Bottleneck: ${bottleneck.name} (${bottleneck.value}ms avg)`);
-    console.log(`CDC Efficiency: ${Math.round((avgLatency.avgTotalCDC / avgLatency.avgTotalSystem) * 100)}% of total time`);
-    console.log(`Blockchain Impact: ${Math.round((avgLatency.avgConsumerToBlockchain / avgLatency.avgTotalSystem) * 100)}% of total time`);
   }
 
   console.log('=======================================');
-  console.log('Consumer shutdown complete');
+  console.log('Optimized consumer shutdown complete');
   console.log('=======================================');
 
   process.exit(0);

@@ -276,6 +276,7 @@ class AttendanceSyncManager:
                 attendance_data["in_time"] = f"{attendance_date} {checkin_time}"
 
             self.erpnext_api.create_doc("Attendance", attendance_data)
+            time.sleep(0.9)  # Add 0.5 second delay after API call
             self.synced_count += 1
             self.processed_count = idx
             loop_time = time.time() - loop_start
