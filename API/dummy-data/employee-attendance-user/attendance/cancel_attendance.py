@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ERPNext Attendance Deletion Script
-Deletes all attendance records from the system.
+ERPNext Attendance Cancellation Script
+Cancels all submitted attendance records in the system.
 Uses environment variables from .env file for configuration.
-Author: ERPNext Attendance Deleter
+Author: ERPNext Attendance Canceller
 Version: 1.0.0
 """
 
@@ -57,8 +57,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class AttendanceDeleter:
-    """Deletes all attendance records from ERPNext"""
+class AttendanceCanceller:
+    """Cancels all submitted attendance records from ERPNext"""
 
     def __init__(self):
         self.session = requests.Session()
@@ -69,7 +69,7 @@ class AttendanceDeleter:
         })
         self.base_url = BASE_URL
 
-        self.deleted_count = 0
+        self.cancelled_count = 0
         self.failed_count = 0
 
         logger.info(f"🔗 API: {self.base_url}")
@@ -85,8 +85,8 @@ class AttendanceDeleter:
                                             params=data if method == "GET" else None)
             response.raise_for_status()
 
-            # Handle DELETE requests that might not return JSON
-            if method == "DELETE":
+            # Handle DELETE/PUT requests that might not return JSON
+            if method in ["DELETE", "PUT"]:
                 return {"success": True}
             else:
                 return response.json()
@@ -105,60 +105,41 @@ class AttendanceDeleter:
                 raise
 
     def get_list(self, doctype: str, filters: Optional[Dict] = None, fields: Optional[List[str]] = None) -> List[Dict]:
-        """Get list of documents with pagination to fetch all records"""
-        all_data = []
-        page_length = 500  # Fetch in chunks of 500 to be safe
-        page_start = 0
+        """Get list of documents"""
+        params = {
+            "limit_page_length": 1000
+        }
+        if filters:
+            params["filters"] = json.dumps(filters)
+        if fields:
+            params["fields"] = json.dumps(fields)
 
-        while True:
-            params = {
-                "limit_page_length": page_length,
-                "limit_start": page_start
-            }
-            if filters:
-                params["filters"] = json.dumps(filters)
-            if fields:
-                params["fields"] = json.dumps(fields)
+        return self._make_request("GET", "resource/" + doctype, params).get("data", [])
 
-            response = self._make_request(
-                "GET", "resource/" + doctype, params).get("data", [])
+    def cancel_doc(self, doctype: str, name: str) -> Dict:
+        """Cancel a document (set docstatus to 2)"""
+        data = {
+            "docstatus": 2  # 2 = Cancelled in ERPNext
+        }
+        return self._make_request("PUT", f"resource/{doctype}/{name}", data)
 
-            if not response:
-                break
-
-            all_data.extend(response)
-            logger.debug(
-                f"Fetched {len(response)} records. Total so far: {len(all_data)}")
-
-            # If we got fewer records than requested, we've reached the end
-            if len(response) < page_length:
-                break
-
-            page_start += page_length
-
-        return all_data
-
-    def delete_doc(self, doctype: str, name: str) -> Dict:
-        """Delete a document"""
-        return self._make_request("DELETE", f"resource/{doctype}/{name}")
-
-    def get_all_attendance_records(self):
-        """Fetch all attendance records with Draft status"""
-        logger.info("📋 Fetching all DRAFT attendance records...")
+    def get_all_submitted_attendance_records(self):
+        """Fetch all submitted attendance records"""
+        logger.info("📋 Fetching all SUBMITTED attendance records...")
 
         try:
-            # Get all attendance records for the company with Draft status only
+            # Get all submitted attendance records for the company (docstatus = 1 = Submitted)
             attendance_records = self.get_list("Attendance",
                                                filters={
-                                                   "company": COMPANY, "docstatus": 0},
-                                               fields=["name", "employee", "attendance_date", "status"])
+                                                   "company": COMPANY, "docstatus": 1},
+                                               fields=["name", "employee", "attendance_date", "status", "docstatus"])
 
             logger.info(
-                f"Found {len(attendance_records)} attendance records for {COMPANY}")
+                f"Found {len(attendance_records)} SUBMITTED attendance records for {COMPANY}")
 
             if attendance_records:
                 # Show some sample records
-                logger.info("Sample attendance records:")
+                logger.info("Sample attendance records to be cancelled:")
                 for i, record in enumerate(attendance_records[:5]):
                     logger.info(
                         f"   {i+1}. {record.get('name')} - {record.get('attendance_date')} ({record.get('status')})")
@@ -173,19 +154,19 @@ class AttendanceDeleter:
             logger.error(f"Error fetching attendance records: {str(e)}")
             return []
 
-    def confirm_deletion(self, attendance_records):
-        """Ask for user confirmation before deletion"""
+    def confirm_cancellation(self, attendance_records):
+        """Ask for user confirmation before cancellation"""
         if not attendance_records:
-            print("\n✅ No DRAFT attendance records found to delete.")
+            print("\n✅ No SUBMITTED attendance records found to cancel.")
             return False
 
         print(
-            f"\n⚠️  WARNING: This will DELETE ALL {len(attendance_records)} DRAFT attendance records!")
+            f"\n⚠️  WARNING: This will CANCEL ALL {len(attendance_records)} SUBMITTED attendance records!")
         print(f"\n🏢 Company: {COMPANY}")
-        print(f"📊 DRAFT Records to delete: {len(attendance_records)}")
+        print(f"📊 SUBMITTED Records to cancel: {len(attendance_records)}")
 
         if attendance_records:
-            print(f"\n📋 Sample records that will be deleted:")
+            print(f"\n📋 Sample records that will be cancelled:")
             for i, record in enumerate(attendance_records[:10]):
                 employee = record.get('employee', 'Unknown')
                 date = record.get('attendance_date', 'Unknown')
@@ -198,36 +179,36 @@ class AttendanceDeleter:
 
         print(f"\n🚨 THIS ACTION CANNOT BE UNDONE!")
         response = input(
-            f"\nAre you sure you want to DELETE ALL {len(attendance_records)} DRAFT attendance records? Type 'DELETE ALL' to confirm: ")
+            f"\nAre you sure you want to CANCEL ALL {len(attendance_records)} SUBMITTED attendance records? Type 'CANCEL ALL' to confirm: ")
 
-        return response == "DELETE ALL"
+        return response == "CANCEL ALL"
 
-    def delete_attendance_records(self, records_to_delete):
-        """Delete all attendance records"""
+    def cancel_attendance_records(self, records_to_cancel):
+        """Cancel all submitted attendance records"""
         print("\n" + "="*60)
-        print("🗑️ Deleting Attendance Records")
+        print("❌ Cancelling Submitted Attendance Records")
         print("="*60)
 
         logger.info(
-            f"Starting deletion of {len(records_to_delete)} attendance records...")
+            f"Starting cancellation of {len(records_to_cancel)} submitted attendance records...")
 
-        for i, record in enumerate(records_to_delete):
+        for i, record in enumerate(records_to_cancel):
             try:
                 record_name = record.get("name")
                 employee = record.get("employee", "Unknown")
                 date = record.get("attendance_date", "Unknown")
 
-                # Delete the attendance record
-                self.delete_doc("Attendance", record_name)
+                # Cancel the attendance record
+                self.cancel_doc("Attendance", record_name)
 
-                self.deleted_count += 1
+                self.cancelled_count += 1
 
-                # Show progress every 50 deletions
-                if self.deleted_count % 50 == 0:
+                # Show progress every 50 cancellations
+                if self.cancelled_count % 50 == 0:
                     print(
-                        f"🗑️ Deleted {self.deleted_count}/{len(records_to_delete)} records...")
+                        f"❌ Cancelled {self.cancelled_count}/{len(records_to_cancel)} records...")
 
-                logger.debug(f"Deleted: {record_name} ({employee} - {date})")
+                logger.debug(f"Cancelled: {record_name} ({employee} - {date})")
 
                 # Small delay to avoid overwhelming the server
                 time.sleep(0.1)
@@ -235,87 +216,68 @@ class AttendanceDeleter:
             except Exception as e:
                 self.failed_count += 1
                 logger.error(
-                    f"❌ Failed to delete record {record.get('name', 'Unknown')}: {str(e)}")
+                    f"❌ Failed to cancel record {record.get('name', 'Unknown')}: {str(e)}")
 
-                # Show failed deletions
+                # Show failed cancellations
                 if self.failed_count <= 10:  # Show first 10 failures
                     print(
-                        f"❌ Failed to delete: {record.get('name', 'Unknown')} - {str(e)[:50]}...")
+                        f"❌ Failed to cancel: {record.get('name', 'Unknown')} - {str(e)[:50]}...")
 
-        return self.deleted_count, self.failed_count
+        return self.cancelled_count, self.failed_count
 
     def run(self):
         """Main execution method"""
         print("=" * 80)
-        print("🗑️ ERPNext DRAFT Attendance Deletion Script")
+        print("❌ ERPNext SUBMITTED Attendance Cancellation Script")
         print("=" * 80)
         print(f"📡 API Endpoint: {BASE_URL}")
         print(f"🏢 Company: {COMPANY}")
-        print("⚠️  THIS WILL DELETE ALL DRAFT ATTENDANCE RECORDS ONLY!")
+        print("⚠️  THIS WILL CANCEL ALL SUBMITTED ATTENDANCE RECORDS!")
         print("=" * 80)
 
         try:
-            # Get all attendance records
-            attendance_records = self.get_all_attendance_records()
+            # Get all submitted attendance records
+            attendance_records = self.get_all_submitted_attendance_records()
 
-            # Confirm deletion
-            if not self.confirm_deletion(attendance_records):
+            # Confirm cancellation
+            if not self.confirm_cancellation(attendance_records):
                 print("Operation cancelled.")
                 return
 
-            # Delete records
-            deleted_count, failed_count = self.delete_attendance_records(
+            # Cancel records
+            cancelled_count, failed_count = self.cancel_attendance_records(
                 attendance_records)
 
             # Summary
             print("\n" + "="*60)
-            print("📊 DELETION SUMMARY")
+            print("📊 CANCELLATION SUMMARY")
             print("="*60)
-            print(f"✅ Successfully Deleted: {deleted_count} records")
-            print(f"❌ Failed Deletions: {failed_count} records")
-            print(f"📊 Total Processed: {len(attendance_records)} records")
-            print(f"🏢 Company: {COMPANY}")
-
-            if deleted_count > 0:
-                print(
-                    f"\n🎉 Successfully deleted {deleted_count} attendance records!")
-                print("💡 The attendance system is now clean and ready for new data.")
+            print(f"✅ Successfully cancelled: {cancelled_count} records")
+            print(f"❌ Failed to cancel: {failed_count} records")
+            print(
+                f"📊 Total processed: {cancelled_count + failed_count} records")
+            print("="*60)
 
             if failed_count > 0:
-                print(f"\n⚠️ {failed_count} records could not be deleted.")
-                print("This might be due to permissions or record dependencies.")
+                logger.warning(
+                    f"⚠️ {failed_count} records failed to cancel. Please check the logs above.")
+            else:
+                logger.info(
+                    "✅ All attendance records have been successfully cancelled!")
 
         except Exception as e:
-            logger.error(f"Fatal error during attendance deletion: {str(e)}")
-            print(f"\n💥 FATAL ERROR: {e}")
-
-
-def main():
-    """Main entry point"""
-    print("🚀 Starting ERPNext Attendance Deletion...")
-
-    # Check API credentials
-    if not API_KEY or not API_SECRET:
-        print("❌ Error: API_KEY and API_SECRET must be set in .env file")
-        return
-
-    print(f"\n🗑️ This will DELETE ALL attendance records for:")
-    print(f"   🏢 Company: {COMPANY}")
-    print(f"   🚨 This action CANNOT be undone!")
-    print(f"   📊 All attendance data will be permanently removed")
-
-    response = input(
-        f"\nDo you want to proceed with attendance deletion? (yes/no): ")
-    if response.lower() != 'yes':
-        print("Operation cancelled.")
-        return
-
-    try:
-        deleter = AttendanceDeleter()
-        deleter.run()
-    except Exception as e:
-        print(f"\n💥 Error: {e}")
+            logger.error(f"Fatal error during cancellation: {str(e)}")
+            print(f"\n❌ Fatal error: {str(e)}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        canceller = AttendanceCanceller()
+        canceller.run()
+    except KeyboardInterrupt:
+        print("\n\n⚠️ Operation interrupted by user.")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}")
+        print(f"\n❌ Fatal error: {str(e)}")
+        sys.exit(1)

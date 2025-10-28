@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-ERPNext Employee Deletion Script
+ERPNext Shift Assignment Cancellation Script
+Cancels all submitted shift assignments.
 """
 
 import requests
@@ -40,8 +41,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ERPNextAPI:
-    """API client for ERPNext"""
+class ShiftAssignmentCanceller:
+    """Cancels submitted shift assignments"""
 
     def __init__(self):
         self.session = requests.Session()
@@ -51,6 +52,8 @@ class ERPNextAPI:
             'Content-Type': 'application/json'
         })
         self.base_url = BASE_URL
+        self.cancelled_count = 0
+        self.failed_count = 0
 
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, retry_count: int = 0) -> Dict:
         """Make API request with retry logic"""
@@ -59,7 +62,7 @@ class ERPNextAPI:
             response = self.session.request(method, url, json=data if method in ["POST", "PUT", "DELETE"] else None,
                                             params=data if method == "GET" else None)
             response.raise_for_status()
-            if method == "DELETE":
+            if method in ["DELETE", "PUT"]:
                 return {"success": True}
             else:
                 return response.json()
@@ -101,101 +104,74 @@ class ERPNextAPI:
 
         return all_data
 
-    def delete_doc(self, doctype: str, name: str) -> Dict:
-        """Delete a document"""
-        return self._make_request("DELETE", f"resource/{doctype}/{name}")
+    def cancel_doc(self, doctype: str, name: str) -> Dict:
+        """Cancel a document"""
+        data = {"docstatus": 2}
+        return self._make_request("PUT", f"resource/{doctype}/{name}", data)
 
-
-class EmployeeDeletor:
-    """Deletes employees"""
-
-    def __init__(self):
-        self.api = ERPNextAPI()
-        self.deleted_count = 0
-        self.failed_count = 0
-
-    def get_all_employees(self):
-        """Get all employees"""
-        logger.info("Fetching employees...")
+    def get_submitted_shift_assignments(self):
+        """Fetch all submitted shift assignments"""
+        logger.info("Fetching submitted shift assignments...")
         try:
-            employees = self.api.get_list("Employee",
-                                          filters={"company": COMPANY},
-                                          fields=["name", "employee_name"])
-            logger.info(f"Found {len(employees)} employees")
-            return employees
+            shift_assignments = self.get_list("Shift Assignment",
+                                              filters=[["Shift Assignment", "company", "=", COMPANY],
+                                                       ["Shift Assignment", "docstatus", "=", 1]],
+                                              fields=["name", "employee", "start_date"])
+            logger.info(
+                f"Found {len(shift_assignments)} submitted shift assignments")
+            return shift_assignments
         except Exception as e:
-            logger.error(f"Error fetching employees: {str(e)}")
+            logger.error(f"Error fetching shift assignments: {str(e)}")
             return []
 
-    def delete_basic_related_data(self, employee_id: str):
-        """Delete basic related data"""
-        basic_doctypes = [
-            ("Shift Assignment", "Shift Assignment"),
-            ("Attendance", "Attendance"),
-            ("Employee Checkin", "Employee Checkin"),
-            ("Leave Application", "Leave Application")
-        ]
+    def cancel_shift_assignments(self, records_to_cancel):
+        """Cancel all submitted shift assignments"""
+        logger.info(
+            f"Cancelling {len(records_to_cancel)} shift assignments...")
 
-        for doctype, _ in basic_doctypes:
+        for i, record in enumerate(records_to_cancel, 1):
             try:
-                records = self.api.get_list(
-                    doctype, filters={"employee": employee_id}, fields=["name"])
-                for record in records:
-                    try:
-                        self.api.delete_doc(doctype, record["name"])
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-    def delete_employees(self, employees_to_delete):
-        """Delete employees"""
-        logger.info(f"Deleting {len(employees_to_delete)} employees...")
-
-        for i, employee in enumerate(employees_to_delete, 1):
-            try:
-                employee_name = employee.get("employee_name", "Unknown")
-                employee_id = employee.get("name", "Unknown")
-
-                self.delete_basic_related_data(employee_id)
-                self.api.delete_doc("Employee", employee_id)
-
-                self.deleted_count += 1
+                record_name = record.get("name")
+                employee = record.get("employee", "Unknown")
+                self.cancel_doc("Shift Assignment", record_name)
+                self.cancelled_count += 1
                 logger.info(
-                    f"Deleted {i}/{len(employees_to_delete)}: {employee_name}")
+                    f"Cancelled {i}/{len(records_to_cancel)}: {record_name} ({employee})")
 
             except Exception as e:
                 self.failed_count += 1
                 logger.error(
-                    f"Failed to delete {employee.get('employee_name', 'Unknown')}: {str(e)}")
+                    f"Failed to cancel {record.get('name', 'Unknown')}: {str(e)}")
 
-        return self.deleted_count, self.failed_count
+        return self.cancelled_count, self.failed_count
 
     def run(self):
         """Main execution"""
-        employees = self.get_all_employees()
+        shift_assignments = self.get_submitted_shift_assignments()
 
-        if not employees:
-            logger.info("No employees found")
+        if not shift_assignments:
+            logger.info("No submitted shift assignments found")
             return
 
-        logger.info(f"Confirming deletion of {len(employees)} employees")
-        response = input("Type 'DELETE ALL' to confirm: ")
+        logger.info(
+            f"Confirming cancellation of {len(shift_assignments)} records")
+        response = input("Type 'CANCEL ALL' to confirm: ")
 
-        if response != "DELETE ALL":
+        if response != "CANCEL ALL":
             logger.info("Operation cancelled")
             return
 
-        deleted_count, failed_count = self.delete_employees(employees)
+        cancelled_count, failed_count = self.cancel_shift_assignments(
+            shift_assignments)
 
-        logger.info(f"Deleted: {deleted_count}")
+        logger.info(f"Cancelled: {cancelled_count}")
         logger.info(f"Failed: {failed_count}")
 
 
 if __name__ == "__main__":
     try:
-        deletor = EmployeeDeletor()
-        deletor.run()
+        canceller = ShiftAssignmentCanceller()
+        canceller.run()
     except KeyboardInterrupt:
         logger.info("Operation interrupted")
         sys.exit(0)

@@ -120,20 +120,18 @@ class AttendanceDeleter:
             if fields:
                 params["fields"] = json.dumps(fields)
 
-            response = self._make_request(
-                "GET", "resource/" + doctype, params).get("data", [])
-
+            response = self._make_request("GET", "resource/" + doctype, params).get("data", [])
+            
             if not response:
                 break
-
+            
             all_data.extend(response)
-            logger.debug(
-                f"Fetched {len(response)} records. Total so far: {len(all_data)}")
-
+            logger.debug(f"Fetched {len(response)} records. Total so far: {len(all_data)}")
+            
             # If we got fewer records than requested, we've reached the end
             if len(response) < page_length:
                 break
-
+            
             page_start += page_length
 
         return all_data
@@ -143,25 +141,25 @@ class AttendanceDeleter:
         return self._make_request("DELETE", f"resource/{doctype}/{name}")
 
     def get_all_attendance_records(self):
-        """Fetch all attendance records with Draft status"""
-        logger.info("📋 Fetching all DRAFT attendance records...")
+        """Fetch all attendance records with Draft and Cancelled status"""
+        logger.info("📋 Fetching all DRAFT and CANCELLED attendance records...")
 
         try:
-            # Get all attendance records for the company with Draft status only
+            # Get all attendance records for the company with Draft (docstatus: 0) or Cancelled (docstatus: 2) status
             attendance_records = self.get_list("Attendance",
-                                               filters={
-                                                   "company": COMPANY, "docstatus": 0},
-                                               fields=["name", "employee", "attendance_date", "status"])
+                                               filters=[["Attendance", "company", "=", COMPANY], ["Attendance", "docstatus", "in", [0, 2]]],
+                                               fields=["name", "employee", "attendance_date", "status", "docstatus"])
 
             logger.info(
-                f"Found {len(attendance_records)} attendance records for {COMPANY}")
+                f"Found {len(attendance_records)} DRAFT and CANCELLED attendance records for {COMPANY}")
 
             if attendance_records:
                 # Show some sample records
-                logger.info("Sample attendance records:")
+                logger.info("Sample attendance records to be deleted:")
                 for i, record in enumerate(attendance_records[:5]):
+                    status_display = f"{record.get('status')} (docstatus: {record.get('docstatus')})"
                     logger.info(
-                        f"   {i+1}. {record.get('name')} - {record.get('attendance_date')} ({record.get('status')})")
+                        f"   {i+1}. {record.get('name')} - {record.get('attendance_date')} ({status_display})")
 
                 if len(attendance_records) > 5:
                     logger.info(
@@ -176,13 +174,13 @@ class AttendanceDeleter:
     def confirm_deletion(self, attendance_records):
         """Ask for user confirmation before deletion"""
         if not attendance_records:
-            print("\n✅ No DRAFT attendance records found to delete.")
+            print("\n✅ No DRAFT or CANCELLED attendance records found to delete.")
             return False
 
         print(
-            f"\n⚠️  WARNING: This will DELETE ALL {len(attendance_records)} DRAFT attendance records!")
+            f"\n⚠️  WARNING: This will DELETE ALL {len(attendance_records)} DRAFT and CANCELLED attendance records!")
         print(f"\n🏢 Company: {COMPANY}")
-        print(f"📊 DRAFT Records to delete: {len(attendance_records)}")
+        print(f"📊 DRAFT & CANCELLED Records to delete: {len(attendance_records)}")
 
         if attendance_records:
             print(f"\n📋 Sample records that will be deleted:")
@@ -190,7 +188,9 @@ class AttendanceDeleter:
                 employee = record.get('employee', 'Unknown')
                 date = record.get('attendance_date', 'Unknown')
                 status = record.get('status', 'Unknown')
-                print(f"   {i+1}. {employee} - {date} ({status})")
+                docstatus = record.get('docstatus', 0)
+                status_label = "DRAFT" if docstatus == 0 else "CANCELLED" if docstatus == 2 else "UNKNOWN"
+                print(f"   {i+1}. {employee} - {date} ({status}) [{status_label}]")
 
             if len(attendance_records) > 10:
                 print(
@@ -198,7 +198,7 @@ class AttendanceDeleter:
 
         print(f"\n🚨 THIS ACTION CANNOT BE UNDONE!")
         response = input(
-            f"\nAre you sure you want to DELETE ALL {len(attendance_records)} DRAFT attendance records? Type 'DELETE ALL' to confirm: ")
+            f"\nAre you sure you want to DELETE ALL {len(attendance_records)} DRAFT and CANCELLED attendance records? Type 'DELETE ALL' to confirm: ")
 
         return response == "DELETE ALL"
 
@@ -247,11 +247,11 @@ class AttendanceDeleter:
     def run(self):
         """Main execution method"""
         print("=" * 80)
-        print("🗑️ ERPNext DRAFT Attendance Deletion Script")
+        print("🗑️ ERPNext DRAFT & CANCELLED Attendance Deletion Script")
         print("=" * 80)
         print(f"📡 API Endpoint: {BASE_URL}")
         print(f"🏢 Company: {COMPANY}")
-        print("⚠️  THIS WILL DELETE ALL DRAFT ATTENDANCE RECORDS ONLY!")
+        print("⚠️  THIS WILL DELETE ALL DRAFT AND CANCELLED ATTENDANCE RECORDS!")
         print("=" * 80)
 
         try:
