@@ -73,3 +73,21 @@ bench --site frontend status
 # Clear cache after installation
 bench --site frontend clear-cache
 ```
+
+## Update FIX
+
+```bash
+# Replace the bad import with a safe alias
+sed -i 's/from erpnext.accounts.utils import build_qb_match_conditions/from frappe.desk.reportview import build_match_conditions as build_qb_match_conditions/' apps/hrms/hrms/hr/doctype/shift_assignment_tool/shift_assignment_tool.py
+
+# Clear bytecode
+find apps/hrms -name "*.pyc" -delete
+find apps/hrms -name "pycache" -type d -exec rm -rf {} +
+
+# Apply and install
+bench clear-cache
+bench --site frontend migrate
+
+# finally install
+bench --site frontend install-app hrms
+```
