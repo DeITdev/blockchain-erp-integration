@@ -91,3 +91,9 @@ bench --site frontend migrate
 # finally install
 bench --site frontend install-app hrms
 ```
+
+## Quick Forward Port using cloudflare within docker
+
+```bash
+docker run -it --rm cloudflare/cloudflared:latest tunnel --url http://host.docker.internal:8080
+```

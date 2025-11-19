@@ -117,17 +117,15 @@ class ShiftAssignmentCanceller:
                                               filters=[["Shift Assignment", "company", "=", COMPANY],
                                                        ["Shift Assignment", "docstatus", "=", 1]],
                                               fields=["name", "employee", "start_date"])
-            logger.info(
-                f"Found {len(shift_assignments)} submitted shift assignments")
+            logger.info(f"Found {len(shift_assignments)} records")
             return shift_assignments
         except Exception as e:
-            logger.error(f"Error fetching shift assignments: {str(e)}")
+            logger.error(f"Error: {str(e)}")
             return []
 
     def cancel_shift_assignments(self, records_to_cancel):
         """Cancel all submitted shift assignments"""
-        logger.info(
-            f"Cancelling {len(records_to_cancel)} shift assignments...")
+        logger.info(f"Cancelling {len(records_to_cancel)} records...")
 
         for i, record in enumerate(records_to_cancel, 1):
             try:
@@ -136,12 +134,11 @@ class ShiftAssignmentCanceller:
                 self.cancel_doc("Shift Assignment", record_name)
                 self.cancelled_count += 1
                 logger.info(
-                    f"Cancelled {i}/{len(records_to_cancel)}: {record_name} ({employee})")
+                    f"[{i}/{len(records_to_cancel)}] Cancelled: {record_name} ({employee})")
 
             except Exception as e:
                 self.failed_count += 1
-                logger.error(
-                    f"Failed to cancel {record.get('name', 'Unknown')}: {str(e)}")
+                logger.error(f"Failed: {record.get('name')}: {str(e)}")
 
         return self.cancelled_count, self.failed_count
 
@@ -150,31 +147,35 @@ class ShiftAssignmentCanceller:
         shift_assignments = self.get_submitted_shift_assignments()
 
         if not shift_assignments:
-            logger.info("No submitted shift assignments found")
+            print("No records found")
             return
 
-        logger.info(
-            f"Confirming cancellation of {len(shift_assignments)} records")
+        print(
+            f"\nWARNING: This will CANCEL ALL {len(shift_assignments)} submitted records")
         response = input("Type 'CANCEL ALL' to confirm: ")
 
         if response != "CANCEL ALL":
-            logger.info("Operation cancelled")
+            print("Operation cancelled")
             return
 
         cancelled_count, failed_count = self.cancel_shift_assignments(
             shift_assignments)
 
-        logger.info(f"Cancelled: {cancelled_count}")
-        logger.info(f"Failed: {failed_count}")
+        print(f"\nCancelled: {cancelled_count}")
+        print(f"Failed: {failed_count}")
 
 
 if __name__ == "__main__":
     try:
+        if not API_KEY or not API_SECRET:
+            print("Error: API_KEY and API_SECRET required in .env")
+            sys.exit(1)
+
         canceller = ShiftAssignmentCanceller()
         canceller.run()
     except KeyboardInterrupt:
-        logger.info("Operation interrupted")
+        print("\nInterrupted")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
+        logger.error(f"Error: {str(e)}")
         sys.exit(1)

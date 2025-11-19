@@ -38,10 +38,21 @@ BASE_URL = os.getenv("BASE_URL")
 COMPANY_NAME = os.getenv("COMPANY_NAME")
 COMPANY_ABBR = os.getenv("COMPANY_ABBR")
 
-BIRTH_YEAR_START = 1990
-BIRTH_YEAR_END = 2005
+BIRTH_YEAR_START = 1945  # Age 80 (2025)
+BIRTH_YEAR_END = 2010    # Age 15 (2025)
 JOIN_EARLY_2025_START = datetime(2024, 6, 1)
 JOIN_EARLY_2025_END = datetime(2025, 5, 31)
+
+EMPLOYMENT_TYPES = [
+    "Apprentice",
+    "Intern",
+    "Piecework",
+    "Commission",
+    "Contract",
+    "Probation",
+    "Part-time",
+    "Full-time"
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,6 +120,7 @@ class EmployeeGenerator:
         ], 'departments': [], 'designations': []}
         self.created_count = 0
         self.failed_count = 0
+        self.age_count = {'75_79': 0, '80_plus': 0}  # Track older employees
         self._fetch_master_data()
 
     def _fetch_master_data(self):
@@ -142,13 +154,50 @@ class EmployeeGenerator:
                 "Manager", "Executive", "Developer", "Analyst", "Coordinator"]
 
     def generate_random_date_in_range(self, start_year: int, end_year: int) -> str:
-        """Generate random date within year range"""
+        """Generate random date within year range with weighted distribution
+        Rules:
+        - 15-54 years old: Dominant (most employees)
+        - 55-74 years old: Moderate (fewer employees)
+        - 75-79 years old: Max 10 people
+        - 80+ years old: Max 10 people
+        """
         start_date = datetime(start_year, 1, 1)
         end_date = datetime(end_year, 12, 31)
         days_between = (end_date - start_date).days
-        random_days = random.randint(0, days_between)
+
+        # Use cubic power for much stronger bias to younger ages (15-54)
+        # This heavily skews toward recent birth years
+        random_factor = random.random() ** 3.5
+        random_days = int(random_factor * days_between)
+
         random_date = start_date + timedelta(days=random_days)
         return random_date.strftime("%Y-%m-%d")
+
+    def calculate_age(self, dob_str: str) -> int:
+        """Calculate age from date of birth string"""
+        dob = datetime.strptime(dob_str, "%Y-%m-%d")
+        today = datetime(2025, 10, 29)
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+    def is_age_allowed(self, dob_str: str) -> bool:
+        """Check if age meets the requirements:
+        - 75-79: Max 10 people
+        - 80+: Max 10 people
+        """
+        age = self.calculate_age(dob_str)
+
+        if 75 <= age <= 79:
+            if self.age_count['75_79'] >= 10:
+                return False
+            self.age_count['75_79'] += 1
+            return True
+        elif age >= 80:
+            if self.age_count['80_plus'] >= 10:
+                return False
+            self.age_count['80_plus'] += 1
+            return True
+
+        return True
 
     def generate_joining_date(self) -> str:
         """Generate joining date before June 2025"""
@@ -197,17 +246,33 @@ class EmployeeGenerator:
                 first_name = fake.first_name()
                 last_name = fake.last_name()
 
+                # Generate DOB and validate age constraints
+                dob = self.generate_random_date_in_range(
+                    BIRTH_YEAR_START, BIRTH_YEAR_END)
+                retry_count = 0
+                while not self.is_age_allowed(dob) and retry_count < 10:
+                    dob = self.generate_random_date_in_range(
+                        BIRTH_YEAR_START, BIRTH_YEAR_END)
+                    retry_count += 1
+
+                if retry_count >= 10:
+                    # Skip this employee if we can't find a valid age (old age limits reached)
+                    logger.info(
+                        f"Skipping {first_name} {last_name} - age limits reached for 75+")
+                    continue
+
                 employee_data = {
                     "employee": self.generate_employee_id(emp_index),
                     "first_name": first_name,
                     "last_name": last_name,
                     "employee_name": f"{first_name} {last_name}",
                     "gender": random.choice(["Male", "Female"]),
-                    "date_of_birth": self.generate_random_date_in_range(BIRTH_YEAR_START, BIRTH_YEAR_END),
+                    "date_of_birth": dob,
                     "date_of_joining": self.generate_joining_date(),
                     "company": COMPANY_NAME,
                     "email": self.generate_email(first_name, last_name, emp_index),
                     "phone_number": self.generate_phone_number(),
+                    "employment_type": random.choice(EMPLOYMENT_TYPES),
                     "status": "Active"
                 }
 

@@ -49,8 +49,8 @@ BASE_URL = os.getenv("BASE_URL")
 COMPANY_NAME = os.getenv("COMPANY_NAME")
 
 # Attendance Configuration
-ATTENDANCE_PER_EMPLOYEE = 10
 COMPANY = "PT Fiyansa Mulya"
+ATTENDANCE_PER_EMPLOYEE = 10  # Default value, can be overridden by user
 
 # Get current month details
 current_date = datetime.now()
@@ -61,7 +61,7 @@ current_month_name = current_date.strftime("%B")
 # Simple logging - console only, no log files
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ logger = logging.getLogger(__name__)
 class AttendanceGenerator:
     """Attendance Generator with current month focus"""
 
-    def __init__(self):
+    def __init__(self, attendance_count=ATTENDANCE_PER_EMPLOYEE):
         self.session = requests.Session()
         self.session.headers.update({
             'Authorization': f'token {API_KEY}:{API_SECRET}',
@@ -78,6 +78,7 @@ class AttendanceGenerator:
             'Content-Type': 'application/json'
         })
         self.base_url = BASE_URL
+        self.attendance_count = attendance_count
 
         # Master data collections
         self.employees = []
@@ -90,10 +91,7 @@ class AttendanceGenerator:
             "On Leave"
         ]
 
-        logger.info(f"🔗 API: {self.base_url}")
-        logger.info(f"🏢 Company: {COMPANY}")
-        logger.info(f"📅 Target Month: {current_month_name} {current_year}")
-        logger.info(f"🔑 Key: {API_KEY[:8] if API_KEY else 'None'}...")
+        logger.info(f"Connecting to {self.base_url}")
 
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, retry_count: int = 0) -> Dict:
         """Make API request with retry logic"""
@@ -136,7 +134,7 @@ class AttendanceGenerator:
 
     def fetch_employees(self):
         """Fetch active employees from the company"""
-        logger.info("👥 Fetching active employees...")
+        logger.info("Fetching employees...")
 
         try:
             employees = self.get_list("Employee",
@@ -145,22 +143,8 @@ class AttendanceGenerator:
                                       fields=["name", "employee_name"])
 
             self.employees = employees
-            logger.info(f"✅ Found {len(self.employees)} active employees")
-
-            if not self.employees:
-                logger.error("❌ No active employees found!")
-                return False
-
-            # Show sample employees
-            logger.info("Sample employees:")
-            for i, emp in enumerate(self.employees[:3]):
-                logger.info(
-                    f"   {i+1}. {emp.get('employee_name')} ({emp.get('name')})")
-
-            if len(self.employees) > 3:
-                logger.info(f"   ... and {len(self.employees) - 3} more")
-
-            return True
+            logger.info(f"Found {len(self.employees)} employees")
+            return bool(self.employees)
 
         except Exception as e:
             logger.error(f"Error fetching employees: {str(e)}")
@@ -168,49 +152,38 @@ class AttendanceGenerator:
 
     def fetch_shift_types(self):
         """Fetch existing shift types"""
-        logger.info("⏰ Fetching shift types...")
+        logger.info("Fetching shift types...")
 
         try:
             shift_types = self.get_list("Shift Type", fields=["name"])
             self.shift_types = [shift.get("name")
                                 for shift in shift_types if shift.get("name")]
 
-            logger.info(f"✅ Found {len(self.shift_types)} shift types")
-
-            if self.shift_types:
-                logger.info(f"Available shifts: {self.shift_types}")
-            else:
-                logger.warning(
-                    "⚠️ No shift types found, attendance will be created without shifts")
-
+            logger.info(f"Found {len(self.shift_types)} shift types")
             return True
 
         except Exception as e:
-            logger.warning(f"⚠️ Could not fetch shift types: {e}")
+            logger.warning(f"Could not fetch shift types: {e}")
             return False
 
     def get_current_month_dates(self):
         """Get all weekdays (Monday-Friday) in the current month"""
         logger.info(
-            f"📅 Generating dates for {current_month_name} {current_year}...")
+            f"Generating dates for {current_month_name} {current_year}...")
 
-        # Get the first and last day of current month
         first_day = datetime(current_year, current_month, 1)
         last_day = datetime(current_year, current_month,
                             calendar.monthrange(current_year, current_month)[1])
 
-        # Get all weekdays in the current month
         weekdays = []
         current_day = first_day
 
         while current_day <= last_day:
-            # Monday = 0, Sunday = 6, so weekdays are 0-4
-            if current_day.weekday() < 5:  # Monday to Friday
+            if current_day.weekday() < 5:
                 weekdays.append(current_day.strftime("%Y-%m-%d"))
             current_day += timedelta(days=1)
 
-        logger.info(
-            f"✅ Found {len(weekdays)} weekdays in {current_month_name}")
+        logger.info(f"Found {len(weekdays)} weekdays")
         return weekdays
 
     def generate_random_time(self, base_time: str, variation_minutes: int = 30):
@@ -226,28 +199,25 @@ class AttendanceGenerator:
 
     def create_attendance_records(self):
         """Create attendance records for all employees"""
-        print("\n" + "="*60)
-        print("📝 Creating Attendance Records")
+        print("\nCreating Attendance Records")
         print("="*60)
 
         if not self.employees:
-            logger.error("❌ No employees available for attendance creation")
-            return 0
+            logger.error("No employees available")
+            return 0, 0
 
-        # Get available dates for current month
         available_dates = self.get_current_month_dates()
 
-        if len(available_dates) < ATTENDANCE_PER_EMPLOYEE:
+        if len(available_dates) < self.attendance_count:
             logger.warning(
-                f"⚠️ Only {len(available_dates)} weekdays available in {current_month_name}, but need {ATTENDANCE_PER_EMPLOYEE} records per employee")
-            logger.warning("Will create attendance for all available dates")
+                f"Only {len(available_dates)} weekdays available, using all")
             records_per_employee = len(available_dates)
         else:
-            records_per_employee = ATTENDANCE_PER_EMPLOYEE
+            records_per_employee = self.attendance_count
 
         total_records_to_create = len(self.employees) * records_per_employee
         logger.info(
-            f"🎯 Target: {records_per_employee} records per employee = {total_records_to_create} total records")
+            f"Target: {total_records_to_create} total records ({records_per_employee} per employee)")
 
         created_count = 0
         failed_count = 0
@@ -255,32 +225,20 @@ class AttendanceGenerator:
         for emp_index, employee in enumerate(self.employees):
             employee_name = employee.get("employee_name", "Unknown")
             employee_id = employee.get("name")
+            progress_pct = ((emp_index + 1) / len(self.employees)) * 100
 
-            print(
-                f"\n👤 Employee {emp_index + 1}/{len(self.employees)}: {employee_name}")
-
-            # Randomly select dates for this employee
             employee_dates = random.sample(available_dates, min(
                 records_per_employee, len(available_dates)))
-            employee_dates.sort()  # Sort dates chronologically
-
-            employee_records_created = 0
+            employee_dates.sort()
 
             for date_index, attendance_date in enumerate(employee_dates):
                 try:
-                    # Random attendance status
                     status = random.choice(self.attendance_statuses)
-
-                    # Random shift (if available)
                     shift = random.choice(
                         self.shift_types) if self.shift_types else None
-
-                    # Random late entry and early exit
-                    # 0 = unchecked, 1 = checked
                     late_entry = random.choice([0, 1])
                     early_exit = random.choice([0, 1])
 
-                    # Prepare attendance data
                     attendance_data = {
                         "employee": employee_id,
                         "attendance_date": attendance_date,
@@ -290,123 +248,95 @@ class AttendanceGenerator:
                         "early_exit": early_exit
                     }
 
-                    # Add shift if available
                     if shift:
                         attendance_data["shift"] = shift
 
-                    # Add realistic time data for present/working statuses
                     if status in ["Present", "Half Day", "Work From Home"]:
-                        # Generate realistic check-in and check-out times
                         check_in_time = self.generate_random_time(
-                            "08:00:00", 60)  # 8 AM ± 1 hour
+                            "08:00:00", 60)
                         check_out_time = self.generate_random_time(
-                            "17:00:00", 60)  # 5 PM ± 1 hour
-
+                            "17:00:00", 60)
                         attendance_data["in_time"] = f"{attendance_date} {check_in_time}"
                         attendance_data["out_time"] = f"{attendance_date} {check_out_time}"
 
-                    # Create attendance record
-                    result = self.create_doc("Attendance", attendance_data)
-
+                    self.create_doc("Attendance", attendance_data)
                     created_count += 1
-                    employee_records_created += 1
-
-                    # Status indicators
-                    late_indicator = "🔴" if late_entry else "⚪"
-                    early_indicator = "🔴" if early_exit else "⚪"
-                    shift_indicator = f"⏰ {shift}" if shift else "⏰ No shift"
-
-                    print(
-                        f"   ✅ {date_index + 1}/{len(employee_dates)}: {attendance_date} - {status}")
-                    print(
-                        f"      {shift_indicator} | Late: {late_indicator} | Early: {early_indicator}")
+                    logger.info(
+                        f"[{emp_index+1}/{len(self.employees)}] ({progress_pct:.0f}%) {employee_name} - {attendance_date}")
 
                 except Exception as e:
                     failed_count += 1
-                    logger.error(
-                        f"❌ Failed to create attendance for {employee_name} on {attendance_date}: {str(e)}")
-                    print(
-                        f"   ❌ {date_index + 1}/{len(employee_dates)}: {attendance_date} - FAILED")
-
-            print(
-                f"   📊 Created {employee_records_created} records for {employee_name}")
+                    logger.error(f"Failed to create attendance: {str(e)}")
 
         return created_count, failed_count
 
     def run(self):
         """Main execution method"""
-        print("=" * 80)
-        print("📝 ERPNext Attendance Generator")
-        print("=" * 80)
-        print(f"📡 API Endpoint: {BASE_URL}")
-        print(f"🏢 Company: {COMPANY}")
-        print(f"📅 Target Month: {current_month_name} {current_year}")
-        print(f"📊 Records per Employee: {ATTENDANCE_PER_EMPLOYEE}")
-        print("=" * 80)
+        print("="*80)
+        print("Attendance Generator")
+        print("="*80)
+        print(f"Records per employee: {self.attendance_count}")
 
         try:
-            # Fetch required data
             if not self.fetch_employees():
-                print("❌ Cannot proceed without employees")
+                print("Cannot proceed without employees")
                 return
 
             self.fetch_shift_types()
 
-            # Create attendance records
             created_count, failed_count = self.create_attendance_records()
 
-            # Summary
             print("\n" + "="*60)
-            print("📊 SUMMARY")
+            print("Summary")
             print("="*60)
-            print(f"✅ Attendance Records Created: {created_count}")
-            print(f"❌ Failed Records: {failed_count}")
-            print(f"👥 Employees Processed: {len(self.employees)}")
-            print(f"📅 Month: {current_month_name} {current_year}")
-            print(f"⏰ Shifts Used: {len(self.shift_types)} different shifts")
-            print(f"📊 Statuses Used: {', '.join(self.attendance_statuses)}")
-
-            if created_count > 0:
-                print(f"\n💡 Attendance features:")
-                print(
-                    f"   - Random dates within {current_month_name} {current_year}")
-                print(f"   - Random attendance statuses")
-                print(f"   - Random shift assignments")
-                print(f"   - Random late entry/early exit flags")
-                print(f"   - Realistic check-in/out times for working days")
+            print(f"Created: {created_count}")
+            print(f"Failed: {failed_count}")
+            print(f"Employees: {len(self.employees)}")
+            print(f"Per employee: {self.attendance_count}")
+            print(f"Month: {current_month_name} {current_year}")
 
         except Exception as e:
-            logger.error(f"Fatal error during attendance generation: {str(e)}")
-            print(f"\n💥 FATAL ERROR: {e}")
+            logger.error(f"Fatal error: {str(e)}")
+            print(f"Error: {e}")
 
 
 def main():
     """Main entry point"""
-    print("🚀 Starting ERPNext Attendance Generation...")
+    print("Starting Attendance Generation...")
 
-    # Check API credentials
     if not API_KEY or not API_SECRET:
-        print("❌ Error: API_KEY and API_SECRET must be set in .env file")
+        print("Error: API_KEY and API_SECRET must be set in .env file")
         return
 
-    print(
-        f"\n📝 This will create attendance records for {current_month_name} {current_year}:")
-    print(f"   📊 {ATTENDANCE_PER_EMPLOYEE} records per employee")
-    print(f"   📅 Random dates within current month")
-    print(f"   ⏰ Random shifts and statuses")
-    print(f"   🔴 Random late entry/early exit flags")
-    print(f"   🏢 Company: {COMPANY}")
+    print(f"\nGenerating attendance for {current_month_name} {current_year}")
 
-    response = input(f"\nProceed with attendance generation? (yes/no): ")
+    # Ask user for attendance count per employee
+    while True:
+        try:
+            count_input = input(
+                "How many attendance records per employee? (default 10): ").strip()
+            if count_input == "":
+                attendance_count = ATTENDANCE_PER_EMPLOYEE
+                break
+            attendance_count = int(count_input)
+            if attendance_count <= 0:
+                print("Please enter a positive number")
+                continue
+            break
+        except ValueError:
+            print("Please enter a valid number")
+
+    response = input(
+        f"Proceed with {attendance_count} records per employee? (yes/no): ")
     if response.lower() != 'yes':
-        print("Operation cancelled.")
+        print("Cancelled.")
         return
 
     try:
-        generator = AttendanceGenerator()
+        generator = AttendanceGenerator(attendance_count)
         generator.run()
     except Exception as e:
-        print(f"\n💥 Error: {e}")
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":

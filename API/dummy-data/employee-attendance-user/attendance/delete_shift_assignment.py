@@ -117,15 +117,15 @@ class ShiftAssignmentDeleter:
                                               filters=[["Shift Assignment", "company", "=", COMPANY],
                                                        ["Shift Assignment", "docstatus", "in", [0, 2]]],
                                               fields=["name", "employee", "start_date"])
-            logger.info(f"Found {len(shift_assignments)} shift assignments")
+            logger.info(f"Found {len(shift_assignments)} records")
             return shift_assignments
         except Exception as e:
-            logger.error(f"Error fetching shift assignments: {str(e)}")
+            logger.error(f"Error: {str(e)}")
             return []
 
     def delete_shift_assignments(self, records_to_delete):
         """Delete all shift assignments"""
-        logger.info(f"Deleting {len(records_to_delete)} shift assignments...")
+        logger.info(f"Deleting {len(records_to_delete)} records...")
 
         for i, record in enumerate(records_to_delete, 1):
             try:
@@ -134,12 +134,11 @@ class ShiftAssignmentDeleter:
                 self.delete_doc("Shift Assignment", record_name)
                 self.deleted_count += 1
                 logger.info(
-                    f"Deleted {i}/{len(records_to_delete)}: {record_name} ({employee})")
+                    f"[{i}/{len(records_to_delete)}] Deleted: {record_name} ({employee})")
 
             except Exception as e:
                 self.failed_count += 1
-                logger.error(
-                    f"Failed to delete {record.get('name', 'Unknown')}: {str(e)}")
+                logger.error(f"Failed: {record.get('name')}: {str(e)}")
 
         return self.deleted_count, self.failed_count
 
@@ -148,30 +147,35 @@ class ShiftAssignmentDeleter:
         shift_assignments = self.get_shift_assignments()
 
         if not shift_assignments:
-            logger.info("No shift assignments found")
+            print("No records found")
             return
 
-        logger.info(f"Confirming deletion of {len(shift_assignments)} records")
+        print(
+            f"\nWARNING: This will DELETE ALL {len(shift_assignments)} records")
         response = input("Type 'DELETE ALL' to confirm: ")
 
         if response != "DELETE ALL":
-            logger.info("Operation cancelled")
+            print("Operation cancelled")
             return
 
         deleted_count, failed_count = self.delete_shift_assignments(
             shift_assignments)
 
-        logger.info(f"Deleted: {deleted_count}")
-        logger.info(f"Failed: {failed_count}")
+        print(f"\nDeleted: {deleted_count}")
+        print(f"Failed: {failed_count}")
 
 
 if __name__ == "__main__":
     try:
+        if not API_KEY or not API_SECRET:
+            print("Error: API_KEY and API_SECRET required in .env")
+            sys.exit(1)
+
         deleter = ShiftAssignmentDeleter()
         deleter.run()
     except KeyboardInterrupt:
-        logger.info("Operation interrupted")
+        print("\nInterrupted")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
+        logger.error(f"Error: {str(e)}")
         sys.exit(1)

@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   portainer:
     container_name: portainer
@@ -8,20 +6,19 @@ services:
       - "8000:8000"
       - "9443:9443"
     networks:
-      portainer-network:
+      - portainer-network
     environment:
       - PORTAINER_SSL=false
+      - AGENT_PORT=8001
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
+    user: "0:0"
     restart: unless-stopped
 
 networks:
   portainer-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.25.0.0/24
 
 volumes:
   portainer_data:

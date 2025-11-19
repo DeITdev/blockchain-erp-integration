@@ -51,7 +51,7 @@ RETRY_DELAY = 2  # seconds
 # Logging setup
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
@@ -69,9 +69,7 @@ class ERPNextAPI:
         })
         self.base_url = BASE_URL
 
-        logger.info(f"🔗 API: {self.base_url}")
-        logger.info(f"🏢 Company: {COMPANY_NAME}")
-        logger.info(f"🔑 Key: {API_KEY[:8] if API_KEY else 'None'}...")
+        logger.info(f"Connecting to {self.base_url}")
 
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None, retry_count: int = 0) -> Dict:
         """Make API request with retry logic"""
@@ -124,145 +122,64 @@ class ShiftAssignmentSubmitter:
 
     def get_draft_shift_assignments(self):
         """Get all draft shift assignment records (docstatus = 0)"""
-        logger.info("📋 Fetching all draft shift assignment records...")
+        logger.info("Fetching draft shift assignment records...")
 
         try:
-            # Get all draft shift assignment records for the company
             draft_assignments = self.api.get_list("Shift Assignment",
                                                   filters={
-                                                      "docstatus": 0,  # Draft status
+                                                      "docstatus": 0,
                                                       "company": COMPANY_NAME
                                                   },
                                                   fields=["name", "employee", "shift_type", "shift_location", "status", "start_date", "end_date"])
 
-            logger.info(
-                f"✅ Found {len(draft_assignments)} draft shift assignment records")
+            logger.info(f"Found {len(draft_assignments)} draft records")
             return draft_assignments
 
         except Exception as e:
-            logger.error(
-                f"Error fetching draft shift assignment records: {str(e)}")
+            logger.error(f"Error fetching records: {str(e)}")
             return []
 
     def submit_shift_assignments(self, shift_assignments):
         """Submit all shift assignment records"""
         if not shift_assignments:
-            logger.info("No draft shift assignment records found to submit.")
+            logger.info("No records to submit")
             return
 
         total_records = len(shift_assignments)
-        logger.info(
-            f"🚀 Starting submission of {total_records} shift assignment records...")
-
-        print("\n" + "="*80)
-        print("📝 SUBMITTING SHIFT ASSIGNMENT RECORDS")
-        print("="*80)
-        print(f"📊 Total Records to Submit: {total_records}")
-        print(f"🏢 Company: {COMPANY_NAME}")
-        print("="*80)
+        logger.info(f"Submitting {total_records} records...")
 
         for i, assignment in enumerate(shift_assignments):
             assignment_name = assignment.get("name")
             employee_name = assignment.get("employee", "Unknown")
-            shift_type = assignment.get("shift_type", "Unknown")
-            shift_location = assignment.get("shift_location", "Unknown")
-            status = assignment.get("status", "Unknown")
-            start_date = assignment.get("start_date", "Unknown")
-            end_date = assignment.get("end_date", "Unknown")
 
             try:
-                # Submit the shift assignment record
                 self.api.submit_doc("Shift Assignment", assignment_name)
                 self.submitted_count += 1
-
-                # Progress logging every 25 records
-                if self.submitted_count % 25 == 0 or self.submitted_count == total_records:
-                    progress_percent = (
-                        self.submitted_count / total_records) * 100
-                    print(
-                        f"✅ Progress: {self.submitted_count}/{total_records} ({progress_percent:.1f}%) submitted")
-
-                status_icon = "🟢" if status == "Active" else "🔴"
-                logger.debug(
-                    f"✅ Submitted: {assignment_name} - {employee_name} - {shift_type} ({status})")
-
-                # Small delay to avoid overwhelming the server
-                time.sleep(0.1)
+                logger.info(
+                    f"[{i+1}/{total_records}] Submitted: {assignment_name}")
+                time.sleep(0.05)
 
             except requests.exceptions.HTTPError as e:
                 self.failed_count += 1
                 error_msg = f"HTTP {e.response.status_code}" if e.response else str(
                     e)
-
-                # Store failed submission details
                 self.failed_submissions.append({
                     "name": assignment_name,
                     "employee": employee_name,
-                    "shift_type": shift_type,
-                    "shift_location": shift_location,
-                    "status": status,
-                    "start_date": start_date,
-                    "end_date": end_date,
                     "error": error_msg
                 })
-
-                if e.response and e.response.status_code == 403:
-                    logger.warning(
-                        f"⚠️ Permission denied for {assignment_name}")
-                elif e.response and e.response.status_code == 409:
-                    logger.warning(
-                        f"⚠️ Conflict for {assignment_name} (may already be submitted)")
-                else:
-                    logger.error(
-                        f"❌ Failed to submit {assignment_name}: {error_msg}")
+                logger.error(
+                    f"[{i+1}/{total_records}] Failed: {assignment_name} - {error_msg}")
 
             except Exception as e:
                 self.failed_count += 1
-                error_msg = str(e)
-
                 self.failed_submissions.append({
                     "name": assignment_name,
                     "employee": employee_name,
-                    "shift_type": shift_type,
-                    "shift_location": shift_location,
-                    "status": status,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "error": error_msg
+                    "error": str(e)
                 })
-
                 logger.error(
-                    f"❌ Failed to submit {assignment_name}: {error_msg}")
-
-        # Final summary
-        print("\n" + "="*80)
-        print("📊 SHIFT ASSIGNMENT SUBMISSION SUMMARY")
-        print("="*80)
-        print(f"✅ Successfully Submitted: {self.submitted_count}")
-        print(f"❌ Failed: {self.failed_count}")
-        print(
-            f"📈 Success Rate: {(self.submitted_count / total_records * 100):.1f}%")
-
-        if self.failed_submissions:
-            print(f"\n❌ Failed Submissions ({len(self.failed_submissions)}):")
-            # Show first 10 failures
-            for i, failure in enumerate(self.failed_submissions[:10]):
-                print(f"   {i+1}. {failure['name']} - {failure['employee']}")
-                print(
-                    f"      Shift: {failure['shift_type']} at {failure['shift_location']}")
-                print(
-                    f"      Status: {failure['status']} | {failure['start_date']} → {failure['end_date']}")
-                print(f"      Error: {failure['error']}")
-                print()
-
-            if len(self.failed_submissions) > 10:
-                print(
-                    f"   ... and {len(self.failed_submissions) - 10} more failures")
-
-        print("="*80)
-
-        logger.info(
-            f"Submission completed: {self.submitted_count} submitted, {self.failed_count} failed")
+                    f"[{i+1}/{total_records}] Failed: {assignment_name}")
 
     def get_status_summary(self):
         """Get summary of shift assignment statuses after submission"""
@@ -272,128 +189,60 @@ class ShiftAssignmentSubmitter:
                                                     "company": COMPANY_NAME},
                                                 fields=["name", "status", "docstatus"])
 
-            draft_count = 0
-            submitted_count = 0
-            active_count = 0
-            inactive_count = 0
+            draft_count = sum(
+                1 for a in all_assignments if a.get("docstatus", 0) == 0)
+            submitted_count = sum(
+                1 for a in all_assignments if a.get("docstatus", 0) == 1)
 
-            for assignment in all_assignments:
-                docstatus = assignment.get("docstatus", 0)
-                status = assignment.get("status", "")
-
-                if docstatus == 0:
-                    draft_count += 1
-                elif docstatus == 1:
-                    submitted_count += 1
-
-                if status == "Active":
-                    active_count += 1
-                elif status == "Inactive":
-                    inactive_count += 1
-
-            print(f"\n📊 FINAL STATUS SUMMARY")
-            print("="*50)
-            print(f"📋 Document Status:")
-            print(f"   📝 Draft (docstatus=0): {draft_count}")
-            print(f"   ✅ Submitted (docstatus=1): {submitted_count}")
-            print(f"📊 Assignment Status:")
-            print(f"   🟢 Active: {active_count}")
-            print(f"   🔴 Inactive: {inactive_count}")
-            print(f"📈 Total: {len(all_assignments)} shift assignments")
-            print("="*50)
+            print(f"\nStatus Summary:")
+            print(
+                f"Draft: {draft_count}, Submitted: {submitted_count}, Total: {len(all_assignments)}")
 
         except Exception as e:
-            logger.error(f"Error getting status summary: {e}")
+            logger.error(f"Error getting status: {e}")
 
     def run(self):
         """Main execution method"""
-        print("=" * 80)
-        print("📝 ERPNext Shift Assignment Records Submitter")
-        print("=" * 80)
-        print(f"📡 API Endpoint: {BASE_URL}")
-        print(f"🏢 Company: {COMPANY_NAME}")
-        print(f"🎯 Action: Submit all draft shift assignment records")
-        print("=" * 80)
+        print("Shift Assignment Submission")
+        print("="*60)
 
         try:
-            # Step 1: Get all draft shift assignment records
             draft_records = self.get_draft_shift_assignments()
 
             if not draft_records:
-                print(
-                    "✅ No draft shift assignment records found. All records may already be submitted.")
-                self.get_status_summary()
+                print("No draft records found.")
                 return
 
-            # Show sample of what will be submitted
-            print(f"\n📋 Sample of records to be submitted:")
-            for i, record in enumerate(draft_records[:5]):
-                employee = record.get("employee", "Unknown")
-                shift_type = record.get("shift_type", "Unknown")
-                shift_location = record.get("shift_location", "Unknown")
-                status = record.get("status", "Unknown")
-                start_date = record.get("start_date", "Unknown")
-                end_date = record.get("end_date", "Unknown")
-                status_icon = "🟢" if status == "Active" else "🔴"
-
-                print(f"   {i+1}. {employee} - {shift_type} at {shift_location}")
-                print(
-                    f"      📅 {start_date} → {end_date} {status_icon} {status}")
-
-            if len(draft_records) > 5:
-                print(f"   ... and {len(draft_records) - 5} more records")
-
-            # Step 2: Confirm submission
-            response = input(
-                f"\nFound {len(draft_records)} draft shift assignment records. Submit all? (yes/no): ")
+            print(f"\nFound {len(draft_records)} draft records")
+            response = input("Submit all? (yes/no): ")
             if response.lower() != 'yes':
-                print("Operation cancelled.")
+                print("Cancelled.")
                 return
 
-            # Step 3: Submit all records
             self.submit_shift_assignments(draft_records)
-
-            # Step 4: Show final status summary
             self.get_status_summary()
 
-            print(f"\n🎉 SHIFT ASSIGNMENT SUBMISSION COMPLETED!")
-            if self.submitted_count > 0:
-                print(
-                    f"✅ {self.submitted_count} shift assignment records have been submitted successfully!")
-            if self.failed_count > 0:
-                print(
-                    f"⚠️ {self.failed_count} records failed to submit - check logs for details")
+            print(
+                f"\nCompleted: {self.submitted_count} submitted, {self.failed_count} failed")
 
         except Exception as e:
-            logger.error(
-                f"Fatal error during shift assignment submission: {str(e)}")
-            print(f"\n💥 FATAL ERROR: {e}")
+            logger.error(f"Fatal error: {str(e)}")
+            print(f"Error: {e}")
 
 
 def main():
     """Main entry point"""
-    print("🚀 Starting ERPNext Shift Assignment Records Submission...")
+    print("Starting Shift Assignment Submission...")
 
-    # Check if API credentials are set
     if not API_KEY or not API_SECRET:
-        print("❌ Error: API_KEY and API_SECRET must be set in .env file")
-        print("\n📋 Required .env file format:")
-        print("API_KEY=your_api_key_here")
-        print("API_SECRET=your_api_secret_here")
-        print("BASE_URL=http://localhost:8080")
-        print("COMPANY_NAME=PT Fiyansa Mulya")
+        print("Error: API_KEY and API_SECRET must be set in .env file")
         return
-
-    print(f"\n📝 This script will submit ALL draft shift assignment records")
-    print(f"🏢 Company: {COMPANY_NAME}")
-    print(f"⚠️ This action will change docstatus from 0 (Draft) to 1 (Submitted)")
-    print(f"🔄 This makes the shift assignments official and active")
 
     try:
         submitter = ShiftAssignmentSubmitter()
         submitter.run()
     except Exception as e:
-        print(f"\n💥 Error: {e}")
+        print(f"Error: {e}")
 
 
 if __name__ == "__main__":
