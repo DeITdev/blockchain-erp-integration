@@ -1,0 +1,10 @@
+# do these command on both frontend and backend container. 
+bench get-app hrms
+
+bench --site frontend install-app hrms
+
+bench migrate
+
+
+# List all installed apps for verify installation
+bench --site frontend list-apps
