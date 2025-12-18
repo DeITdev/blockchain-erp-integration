@@ -1,179 +1,219 @@
+/**
+ * Dynamic Connector Setup - Multi-database Debezium connector management
+ * 
+ * Supports MySQL, PostgreSQL, MongoDB, and SQL Server connectors.
+ * Uses app configuration from the registry for connector setup.
+ */
+
 const axios = require('axios');
 const mysql = require('mysql2/promise');
-const fs = require('fs');
-const path = require('path');
+const { getRegistry } = require('../config/registry');
 
 class DynamicConnectorSetup {
-  constructor() {
-    this.dbConfig = {
-      host: process.env.DB_HOST || 'localhost',
-      port: process.env.DB_PORT || 3306,
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'admin'
-    };
-
-    this.kafkaConnectUrl = process.env.KAFKA_CONNECT_URL;
-    this.topicPrefix = process.env.TOPIC_PREFIX;
-    this.targetTables = (process.env.TARGET_TABLES).split(',');
+  constructor(options = {}) {
+    this.kafkaConnectUrl = options.kafkaConnectUrl || process.env.KAFKA_CONNECT_URL || 'http://localhost:8083';
   }
 
-  async discoverERPNextDatabases() {
-    console.log('Discovering ERPNext databases...');
+  /**
+   * Debezium connector class mapping
+   */
+  static CONNECTOR_CLASSES = {
+    mysql: 'io.debezium.connector.mysql.MySqlConnector',
+    mariadb: 'io.debezium.connector.mysql.MySqlConnector',
+    postgres: 'io.debezium.connector.postgresql.PostgresConnector',
+    postgresql: 'io.debezium.connector.postgresql.PostgresConnector',
+    mongodb: 'io.debezium.connector.mongodb.MongoDbConnector',
+    mongo: 'io.debezium.connector.mongodb.MongoDbConnector',
+    sqlserver: 'io.debezium.connector.sqlserver.SqlServerConnector',
+    mssql: 'io.debezium.connector.sqlserver.SqlServerConnector'
+  };
 
-    try {
-      const connection = await mysql.createConnection(this.dbConfig);
-
-      const [databases] = await connection.execute('SHOW DATABASES');
-      const erpNextDatabases = [];
-
-      for (const db of databases) {
-        const dbName = db.Database;
-
-        if (['information_schema', 'performance_schema', 'mysql', 'sys'].includes(dbName)) {
-          continue;
-        }
-
-        try {
-          await connection.execute(`USE \`${dbName}\``);
-          const [tables] = await connection.execute(`
-            SELECT TABLE_NAME 
-            FROM information_schema.TABLES 
-            WHERE TABLE_SCHEMA = ? 
-            AND TABLE_NAME IN ('tabDocType', 'tabUser', 'tabEmployee', 'tabCompany')
-          `, [dbName]);
-
-          if (tables.length >= 2) {
-            console.log(`Found ERPNext database: ${dbName}`);
-            erpNextDatabases.push(dbName);
-          }
-        } catch (error) {
-          console.log(`Skipped database ${dbName}: ${error.message}`);
-        }
-      }
-
-      await connection.end();
-      return erpNextDatabases;
-
-    } catch (error) {
-      console.error('Error discovering databases:', error.message);
-      throw error;
+  /**
+   * Get connector class for database type
+   */
+  getConnectorClass(dbType) {
+    const connectorClass = DynamicConnectorSetup.CONNECTOR_CLASSES[dbType?.toLowerCase()];
+    if (!connectorClass) {
+      throw new Error(`Unsupported database type: ${dbType}`);
     }
+    return connectorClass;
   }
 
-  async getAvailableTables(databaseName) {
-    try {
-      const connection = await mysql.createConnection(this.dbConfig);
-      await connection.execute(`USE \`${databaseName}\``);
+  /**
+   * Create connector configuration from app config
+   * @param {object} appConfig - App configuration from registry
+   * @param {object} dbCredentials - Database credentials
+   * @returns {object} Debezium connector configuration
+   */
+  createConnectorConfig(appConfig, dbCredentials) {
+    const dbType = appConfig.database.type.toLowerCase();
+    const connectorClass = this.getConnectorClass(dbType);
 
-      const [tables] = await connection.execute(`
-        SELECT TABLE_NAME 
-        FROM information_schema.TABLES 
-        WHERE TABLE_SCHEMA = ? 
-        AND TABLE_NAME LIKE 'tab%'
-        ORDER BY TABLE_NAME
-      `, [databaseName]);
+    const connectorName = `${appConfig.name}-cdc-connector`;
+    const topicPrefix = appConfig.kafka?.topicPrefix || appConfig.name;
 
-      await connection.end();
-      return tables.map(t => t.TABLE_NAME);
+    // Build table list
+    const tables = appConfig.tables?.map(t => t.name) || [];
+    const tableList = tables.map(t => `${dbCredentials.database}.${t}`).join(',');
 
-    } catch (error) {
-      console.error(`Error getting tables for database ${databaseName}:`, error.message);
-      return [];
-    }
-  }
-
-  createConnectorConfig(databaseName, targetTables = null) {
-    const tables = targetTables || this.targetTables;
-    const tableList = tables.map(table => `${databaseName}.${table}`).join(',');
-
-    const serverIdBase = Math.abs(databaseName.split('').reduce((hash, char) => {
+    // Generate unique server ID
+    const serverIdBase = Math.abs(appConfig.name.split('').reduce((hash, char) => {
       return ((hash << 5) - hash) + char.charCodeAt(0);
     }, 0));
     const serverId = 184000 + (serverIdBase % 1000);
 
     // Convert localhost to host.docker.internal for Docker containers
-    let dbHost = this.dbConfig.host;
+    let dbHost = dbCredentials.host || 'localhost';
     if (dbHost === 'localhost' || dbHost === '127.0.0.1') {
       dbHost = 'host.docker.internal';
     }
 
-    return {
-      name: `erpnext-cdc-${databaseName.replace(/[^a-zA-Z0-9]/g, '-')}`,
+    // Base configuration
+    const baseConfig = {
+      name: connectorName,
       config: {
-        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
-        "tasks.max": "1",
-        "database.hostname": dbHost,
-        "database.port": this.dbConfig.port.toString(),
-        "database.user": this.dbConfig.user,
-        "database.password": this.dbConfig.password,
-        "database.server.id": serverId.toString(),
-        "topic.prefix": this.topicPrefix,
-        "database.include.list": databaseName,
-        "table.include.list": tableList,
-        "schema.history.internal.kafka.bootstrap.servers": "kafka:9092",
-        "schema.history.internal.kafka.topic": `schema-changes.${this.topicPrefix}.${databaseName}`,
-        "schema.history.internal.consumer.security.protocol": "PLAINTEXT",
-        "schema.history.internal.producer.security.protocol": "PLAINTEXT",
-        "include.schema.changes": "true",
+        'connector.class': connectorClass,
+        'tasks.max': '1',
+        'topic.prefix': topicPrefix,
 
-        // === ENHANCED TIMESTAMP TRACKING ===
-        // Enable transaction metadata for better timing
-        "provide.transaction.metadata": "true",
+        // Transforms
+        'transforms': 'unwrap,addTimestamp',
+        'transforms.unwrap.type': 'io.debezium.transforms.ExtractNewRecordState',
+        'transforms.unwrap.drop.tombstones': 'false',
+        'transforms.unwrap.delete.handling.mode': 'rewrite',
+        'transforms.addTimestamp.type': 'org.apache.kafka.connect.transforms.InsertField$Value',
+        'transforms.addTimestamp.timestamp.field': 'connector_processing_time',
 
-        // Enhanced timestamp precision
-        "source.timestamp.mode": "connector",
-        "time.precision.mode": "adaptive_time_microseconds",
+        // Schema history
+        'schema.history.internal.kafka.bootstrap.servers': 'kafka:9092',
+        'schema.history.internal.kafka.topic': `schema-changes.${topicPrefix}`,
+        'schema.history.internal.consumer.security.protocol': 'PLAINTEXT',
+        'schema.history.internal.producer.security.protocol': 'PLAINTEXT',
+        'include.schema.changes': 'true',
 
-        // Better decimal and numeric handling
-        "decimal.handling.mode": "string",
-        "bigint.unsigned.handling.mode": "long",
-
-        // Enhanced transforms for timestamp tracking
-        "transforms": "unwrap,addTimestamp",
-
-        // Original unwrap transform
-        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-        "transforms.unwrap.drop.tombstones": "false",
-        "transforms.unwrap.delete.handling.mode": "rewrite",
-
-        // NEW: Add connector processing timestamp
-        "transforms.addTimestamp.type": "org.apache.kafka.connect.transforms.InsertField$Value",
-        "transforms.addTimestamp.timestamp.field": "connector_processing_time",
-
-        // Kafka producer optimizations for latency tracking
-        "producer.override.compression.type": "gzip",
-        "producer.override.acks": "1",
-        "producer.override.batch.size": "1024",
-        "producer.override.linger.ms": "5",
-        "producer.override.request.timeout.ms": "10000",
-
-        // Binary log optimizations
-        "binlog.buffer.size": "32768",
-        "max.batch.size": "2048",
-        "max.queue.size": "8192",
-
-        // Snapshot and general settings
-        "snapshot.mode": "initial",
-        "snapshot.locking.mode": "none",
-        "database.allowPublicKeyRetrieval": "true",
+        // Producer optimizations
+        'producer.override.compression.type': 'gzip',
+        'producer.override.acks': '1',
+        'producer.override.batch.size': '1024',
+        'producer.override.linger.ms': '5',
 
         // Error handling
-        "errors.tolerance": "none",
-        "errors.log.enable": "true",
-        "errors.log.include.messages": "true"
+        'errors.tolerance': 'none',
+        'errors.log.enable': 'true',
+        'errors.log.include.messages': 'true',
+
+        // Snapshot settings
+        'snapshot.mode': 'initial',
+        'snapshot.locking.mode': 'none'
       }
     };
+
+    // Add database-specific configuration
+    switch (dbType) {
+      case 'mysql':
+      case 'mariadb':
+        return this.addMySQLConfig(baseConfig, dbHost, dbCredentials, tableList, serverId);
+      case 'postgres':
+      case 'postgresql':
+        return this.addPostgresConfig(baseConfig, dbHost, dbCredentials, tableList);
+      case 'mongodb':
+      case 'mongo':
+        return this.addMongoDBConfig(baseConfig, dbHost, dbCredentials, tables);
+      case 'sqlserver':
+      case 'mssql':
+        return this.addSQLServerConfig(baseConfig, dbHost, dbCredentials, tableList);
+      default:
+        throw new Error(`Unsupported database type: ${dbType}`);
+    }
   }
 
+  addMySQLConfig(config, host, credentials, tableList, serverId) {
+    Object.assign(config.config, {
+      'database.hostname': host,
+      'database.port': String(credentials.port || 3306),
+      'database.user': credentials.user,
+      'database.password': credentials.password,
+      'database.server.id': String(serverId),
+      'database.include.list': credentials.database,
+      'table.include.list': tableList,
+      'database.allowPublicKeyRetrieval': 'true',
+      'decimal.handling.mode': 'string',
+      'bigint.unsigned.handling.mode': 'long',
+      'time.precision.mode': 'adaptive_time_microseconds',
+      'provide.transaction.metadata': 'true',
+      'binlog.buffer.size': '32768',
+      'max.batch.size': '2048',
+      'max.queue.size': '8192'
+    });
+    return config;
+  }
+
+  addPostgresConfig(config, host, credentials, tableList) {
+    Object.assign(config.config, {
+      'database.hostname': host,
+      'database.port': String(credentials.port || 5432),
+      'database.user': credentials.user,
+      'database.password': credentials.password,
+      'database.dbname': credentials.database,
+      'table.include.list': tableList,
+      'plugin.name': 'pgoutput',
+      'slot.name': `${config.name.replace(/[^a-z0-9]/g, '_')}_slot`,
+      'publication.name': 'dbz_publication',
+      'decimal.handling.mode': 'string',
+      'time.precision.mode': 'adaptive_time_microseconds',
+      'provide.transaction.metadata': 'true'
+    });
+    return config;
+  }
+
+  addMongoDBConfig(config, host, credentials, collections) {
+    const connectionString = credentials.connectionString ||
+      `mongodb://${credentials.user}:${credentials.password}@${host}:${credentials.port || 27017}`;
+
+    Object.assign(config.config, {
+      'mongodb.connection.string': connectionString,
+      'mongodb.name': credentials.database,
+      'collection.include.list': collections.map(c => `${credentials.database}.${c}`).join(','),
+      'capture.mode': 'change_streams_update_full',
+      'snapshot.mode': 'initial'
+    });
+
+    // Remove SQL-specific transforms
+    delete config.config['transforms'];
+    delete config.config['transforms.unwrap.type'];
+    delete config.config['transforms.unwrap.drop.tombstones'];
+    delete config.config['transforms.unwrap.delete.handling.mode'];
+    delete config.config['transforms.addTimestamp.type'];
+    delete config.config['transforms.addTimestamp.timestamp.field'];
+
+    return config;
+  }
+
+  addSQLServerConfig(config, host, credentials, tableList) {
+    Object.assign(config.config, {
+      'database.hostname': host,
+      'database.port': String(credentials.port || 1433),
+      'database.user': credentials.user,
+      'database.password': credentials.password,
+      'database.dbname': credentials.database,
+      'table.include.list': tableList,
+      'database.encrypt': 'false',
+      'database.trustServerCertificate': 'true',
+      'decimal.handling.mode': 'string',
+      'time.precision.mode': 'adaptive_time_microseconds'
+    });
+    return config;
+  }
+
+  /**
+   * Register a connector with Kafka Connect
+   */
   async registerConnector(connectorConfig) {
     try {
-      console.log(`Registering connector with enhanced timestamps: ${connectorConfig.name}`);
-      console.log(`Target Database: ${connectorConfig.config['database.include.list']}`);
-      console.log(`Target Tables: ${connectorConfig.config['table.include.list']}`);
-      console.log(`Database Hostname: ${connectorConfig.config['database.hostname']}`);
-      console.log(`Timestamp Mode: ${connectorConfig.config['source.timestamp.mode']}`);
-      console.log(`Time Precision: ${connectorConfig.config['time.precision.mode']}`);
+      console.log(`Registering connector: ${connectorConfig.name}`);
+      console.log(`Database Type: ${connectorConfig.config['connector.class']}`);
 
+      // Delete existing connector if present
       try {
         await axios.delete(`${this.kafkaConnectUrl}/connectors/${connectorConfig.name}`);
         console.log('Deleted existing connector');
@@ -182,31 +222,28 @@ class DynamicConnectorSetup {
         // Connector doesn't exist, which is fine
       }
 
+      // Create new connector
       const response = await axios.post(
         `${this.kafkaConnectUrl}/connectors`,
         connectorConfig,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
+        { headers: { 'Content-Type': 'application/json' } }
       );
 
-      console.log('✓ Connector with enhanced timestamps registered successfully!');
+      console.log('✓ Connector registered successfully!');
 
+      // Check status
       await new Promise(resolve => setTimeout(resolve, 3000));
-      const statusResponse = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorConfig.name}/status`);
+      const status = await this.getConnectorStatus(connectorConfig.name);
 
-      console.log(`Connector Status: ${statusResponse.data.connector.state}`);
-      if (statusResponse.data.tasks.length > 0) {
-        console.log(`Task Status: ${statusResponse.data.tasks[0].state}`);
-        if (statusResponse.data.tasks[0].trace) {
-          console.log(`Task Error: ${statusResponse.data.tasks[0].trace}`);
+      console.log(`Connector Status: ${status?.connector?.state || 'UNKNOWN'}`);
+      if (status?.tasks?.[0]) {
+        console.log(`Task Status: ${status.tasks[0].state}`);
+        if (status.tasks[0].trace) {
+          console.log(`Task Error: ${status.tasks[0].trace.substring(0, 200)}...`);
         }
       }
 
       return true;
-
     } catch (error) {
       console.error('Error registering connector:', error.message);
       if (error.response) {
@@ -216,58 +253,35 @@ class DynamicConnectorSetup {
     }
   }
 
-  async autoSetup() {
-    console.log('Auto-detecting ERPNext setup with enhanced timestamp tracking...');
+  /**
+   * Setup connector from app configuration
+   */
+  async setupFromAppConfig(appName, dbCredentials) {
+    const registry = await getRegistry();
+    const appConfig = registry.getApp(appName);
 
-    const databases = await this.discoverERPNextDatabases();
-
-    if (databases.length === 0) {
-      throw new Error('No ERPNext databases found');
+    if (!appConfig) {
+      throw new Error(`App configuration not found: ${appName}`);
     }
 
-    const database = databases[0];
-    console.log(`Auto-selected database: ${database}`);
+    console.log(`Setting up CDC connector for: ${appConfig.displayName || appName}`);
+    console.log(`Database Type: ${appConfig.database.type}`);
+    console.log(`Tables: ${appConfig.tables?.map(t => t.name).join(', ') || 'all'}`);
 
-    const availableTables = await this.getAvailableTables(database);
-    const existingTargetTables = this.targetTables.filter(table =>
-      availableTables.includes(table)
-    );
-
-    if (existingTargetTables.length === 0) {
-      throw new Error(`No target tables found in ${database}. Available tables: ${availableTables.slice(0, 10).join(', ')}`);
-    }
-
-    console.log(`Found target tables: ${existingTargetTables.join(', ')}`);
-
-    const connectorConfig = this.createConnectorConfig(database, existingTargetTables);
-    const success = await this.registerConnector(connectorConfig);
-
-    if (!success) {
-      throw new Error('Failed to register connector');
-    }
-
-    console.log('\n=== Enhanced Timestamp Features Enabled ===');
-    console.log('✓ Transaction metadata tracking');
-    console.log('✓ Connector timestamp insertion');
-    console.log('✓ Microsecond precision timing');
-    console.log('✓ Optimized producer settings for latency');
-    console.log('✓ Enhanced binary log buffering');
-
-    return {
-      database,
-      tables: existingTargetTables,
-      connectorName: connectorConfig.name,
-      topics: existingTargetTables.map(table => `${this.topicPrefix}.${database}.${table}`),
-      timestampFeatures: {
-        transactionMetadata: true,
-        connectorTimestamp: true,
-        microsecondPrecision: true,
-        optimizedLatency: true
-      }
-    };
+    const connectorConfig = this.createConnectorConfig(appConfig, dbCredentials);
+    return await this.registerConnector(connectorConfig);
   }
 
-  // Additional utility methods for monitoring
+  /**
+   * Auto-setup for ERPNext (legacy support)
+   */
+  async autoSetupERPNext(dbCredentials) {
+    return await this.setupFromAppConfig('erpnext', dbCredentials);
+  }
+
+  /**
+   * List all connectors
+   */
   async listConnectors() {
     try {
       const response = await axios.get(`${this.kafkaConnectUrl}/connectors`);
@@ -278,6 +292,9 @@ class DynamicConnectorSetup {
     }
   }
 
+  /**
+   * Get connector status
+   */
   async getConnectorStatus(connectorName) {
     try {
       const response = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorName}/status`);
@@ -288,13 +305,57 @@ class DynamicConnectorSetup {
     }
   }
 
-  async getConnectorConfig(connectorName) {
+  /**
+   * Delete a connector
+   */
+  async deleteConnector(connectorName) {
     try {
-      const response = await axios.get(`${this.kafkaConnectUrl}/connectors/${connectorName}/config`);
+      await axios.delete(`${this.kafkaConnectUrl}/connectors/${connectorName}`);
+      console.log(`Deleted connector: ${connectorName}`);
+      return true;
+    } catch (error) {
+      console.error(`Error deleting connector ${connectorName}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Restart a connector
+   */
+  async restartConnector(connectorName) {
+    try {
+      await axios.post(`${this.kafkaConnectUrl}/connectors/${connectorName}/restart`);
+      console.log(`Restarted connector: ${connectorName}`);
+      return true;
+    } catch (error) {
+      console.error(`Error restarting connector ${connectorName}:`, error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Get Kafka Connect cluster info
+   */
+  async getClusterInfo() {
+    try {
+      const response = await axios.get(this.kafkaConnectUrl);
       return response.data;
     } catch (error) {
-      console.error(`Error getting config for ${connectorName}:`, error.message);
+      console.error('Error getting cluster info:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Get available connector plugins
+   */
+  async getConnectorPlugins() {
+    try {
+      const response = await axios.get(`${this.kafkaConnectUrl}/connector-plugins`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting connector plugins:', error.message);
+      return [];
     }
   }
 }

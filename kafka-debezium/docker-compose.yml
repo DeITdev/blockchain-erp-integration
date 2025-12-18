@@ -32,7 +32,8 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     ports:
       - "29092:29092"
-      - "9092:9092"
+      # Note: Internal 9092 is used within Docker network only
+      # External access uses 29092 (KAFKA_BROKER env var)
     networks:
       - kafka_net
     healthcheck:
@@ -50,7 +51,7 @@ services:
       start_period: 30s
 
   connect:
-    image: debezium/connect:2.1
+    image: debezium/connect:2.4
     depends_on:
       kafka:
         condition: service_healthy
@@ -64,6 +65,8 @@ services:
       VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
       CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # Enable all connector plugins (MySQL, PostgreSQL, MongoDB, SQL Server)
+      CONNECT_PLUGIN_PATH: /kafka/connect,/debezium-connector-mysql,/debezium-connector-postgres,/debezium-connector-mongodb,/debezium-connector-sqlserver
     ports:
       - "8083:8083"
     networks:
@@ -88,6 +91,9 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      # Enable Kafka Connect UI (Debezium)
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
     networks:
       - kafka_net
 

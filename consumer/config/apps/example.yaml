@@ -1,0 +1,58 @@
+# Example App Configuration Template
+# Copy this file and modify for your application
+
+name: example-app
+displayName: Example Application
+description: Template for configuring a new database source
+
+database:
+  # Database type: mysql, postgres, mongodb, sqlserver
+  type: mysql
+  
+  # Table prefix (leave empty if none)
+  tablePrefix: ""
+  
+  # Field that contains the record ID
+  idField: id
+  
+  # Timestamp field mappings
+  timestampFields:
+    created: created_at
+    modified: updated_at
+    modifiedBy: updated_by
+  
+  # Timezone offset in hours from UTC (0 for UTC)
+  timezoneOffsetHours: 0
+  
+  # Tables to check for when auto-detecting this app type (optional)
+  discoveryTables: []
+
+# Blockchain API configuration
+blockchain:
+  # API endpoint URL (supports environment variable substitution)
+  apiEndpoint: ${API_ENDPOINT:-http://127.0.0.1:4001}
+
+# Kafka configuration
+kafka:
+  # Topic prefix for this app
+  topicPrefix: example
+
+# Tables to monitor for CDC
+tables:
+  - name: users
+    displayName: Users
+    endpoint: /users
+    dataKey: userData
+    # Fields to include (empty = auto-discover all non-null fields)
+    fields: []
+    
+  - name: orders
+    displayName: Orders
+    endpoint: /orders
+    dataKey: orderData
+    fields:
+      - id
+      - customer_id
+      - status
+      - total_amount
+      - created_at
