@@ -10,6 +10,7 @@ bench get-app {app_name} && bench --site {site_name} install-app {app_name} && b
 
 # List all installed apps for verify installation
 bench --site {site_name} list-apps
+bench --site frontend list-apps
 
 # uninstall app
 bench --site {site_name} uninstall-app {app_name}
