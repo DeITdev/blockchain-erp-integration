@@ -10,3 +10,9 @@ bench get-app {app_name} && bench --site {site_name} install-app {app_name} && b
 
 # List all installed apps for verify installation
 bench --site {site_name} list-apps
+
+# uninstall app
+bench --site {site_name} uninstall-app {app_name}
+
+# remove from apps folder
+bench remove-app {app_name}
