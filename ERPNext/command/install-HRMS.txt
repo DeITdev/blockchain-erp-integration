@@ -1,0 +1,2 @@
+# do these command on both frontend and backend container in one line
+bench get-app hrms && bench --site frontend install-app hrms && bench migrate

@@ -1,0 +1,2 @@
+# do these command on both frontend and backend container in one line
+bench get-app https://github.com/DeITdev/blockchain_hcm.git && bench --site frontend install-app blockchain_hcm && bench migrate
