@@ -1,0 +1,163 @@
+name: blockchain-besu-ibft
+
+services:
+  # Bootstrap/Bootnode (Node-1)
+  node-1:
+    container_name: ibft-node-1
+    image: hyperledger/besu:25.7.0
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-1/data:/opt/besu/data
+    ports:
+      - "8545:8545"
+    networks:
+      besu-network:
+        ipv4_address: 172.16.239.11
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --host-allowlist="*"
+      --rpc-http-cors-origins="all"
+      --profile=ENTERPRISE
+      --revert-reason-enabled=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-2
+  node-2:
+    container_name: ibft-node-2
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-2/data:/opt/besu/data
+    ports:
+      - "8546:8546"
+    networks:
+      besu-network:
+        ipv4_address: 172.16.239.12
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --bootnodes=enode://8fbfa5c13e0913f9bfbbf8a08ecc90ca7c13bc9d33a86e5e9b6aae814f1b501195977fbedac8f94bd4cf4bf90fceb9966572c03dcde7e170110c6a6be78d2048@172.16.239.11:30303
+      --p2p-port=30304
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --host-allowlist="*"
+      --rpc-http-cors-origins="all"
+      --rpc-http-port=8546
+      --profile=ENTERPRISE
+      --revert-reason-enabled=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-3
+  node-3:
+    container_name: ibft-node-3
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-3/data:/opt/besu/data
+    ports:
+      - "8547:8547"
+    networks:
+      besu-network:
+        ipv4_address: 172.16.239.13
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --bootnodes=enode://8fbfa5c13e0913f9bfbbf8a08ecc90ca7c13bc9d33a86e5e9b6aae814f1b501195977fbedac8f94bd4cf4bf90fceb9966572c03dcde7e170110c6a6be78d2048@172.16.239.11:30303
+      --p2p-port=30305
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --host-allowlist="*"
+      --rpc-http-cors-origins="all"
+      --rpc-http-port=8547
+      --profile=ENTERPRISE
+      --revert-reason-enabled=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-4
+  node-4:
+    container_name: ibft-node-4
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-4/data:/opt/besu/data
+    ports:
+      - "8548:8548"
+    networks:
+      besu-network:
+        ipv4_address: 172.16.239.14
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --bootnodes=enode://8fbfa5c13e0913f9bfbbf8a08ecc90ca7c13bc9d33a86e5e9b6aae814f1b501195977fbedac8f94bd4cf4bf90fceb9966572c03dcde7e170110c6a6be78d2048@172.16.239.11:30303
+      --p2p-port=30306
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --host-allowlist="*"
+      --rpc-http-cors-origins="all"
+      --rpc-http-port=8548
+      --profile=ENTERPRISE
+      --revert-reason-enabled=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Blockchain Explorer
+  quorum-explorer:
+    container_name: ibft-blockchain-explorer
+    image: consensys/quorum-explorer
+    depends_on:
+      node-1:
+        condition: service_healthy
+    ports:
+      - "25000:25000/tcp"
+    networks:
+      besu-network:
+        ipv4_address: 172.16.239.15
+    environment:
+      - QE_CONFIG_PATH=/app/config.json
+      - NODE_ENV=production
+      - DISABLE_AUTH=true
+    volumes:
+      - ./explorer-config.json:/app/config.json
+    restart: unless-stopped
+
+networks:
+  besu-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.16.239.0/24

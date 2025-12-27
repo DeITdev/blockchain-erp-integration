@@ -12,6 +12,12 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import socket; s=socket.socket(); s.connect((\"localhost\", 8000)); s.close()'"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     volumes:
       - sites-latest:/home/frappe/frappe-bench/sites
       - logs-latest:/home/frappe/frappe-bench/logs
@@ -120,7 +126,10 @@ services:
     networks:
       - frappe_network_latest
     depends_on:
-      - websocket-latest
+      backend-latest:
+        condition: service_healthy
+      websocket-latest:
+        condition: service_started
     deploy:
       restart_policy:
         condition: on-failure

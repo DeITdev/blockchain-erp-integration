@@ -1,0 +1,11 @@
+NODE1
+besu --data-path=data --genesis-file=../genesis.json --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist="*" --rpc-http-cors-origins="all" --profile=ENTERPRISE
+
+NODE2
+besu --data-path=data --genesis-file=../genesis.json --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@127.0.0.1:30303 --p2p-port=30304 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist="*" --rpc-http-cors-origins="all" --rpc-http-port=8546 --profile=ENTERPRISE
+
+NODE3
+besu --data-path=data --genesis-file=../genesis.json --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@127.0.0.1:30303 --p2p-port=30305 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist="*" --rpc-http-cors-origins="all" --rpc-http-port=8547 --profile=ENTERPRISE
+
+NODE4
+besu --data-path=data --genesis-file=../genesis.json --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@127.0.0.1:30303 --p2p-port=30306 --rpc-http-enabled --rpc-http-api=ETH,NET,QBFT --host-allowlist="*" --rpc-http-cors-origins="all" --rpc-http-port=8548 --profile=ENTERPRISE

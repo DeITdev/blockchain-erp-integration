@@ -1,0 +1,49 @@
+Algorithm 1. Smart contract: {x}Storage
+x = employee || attendance
+Data: Initialize
+  recordId: string
+  createdTimestamp: uint
+  modifiedTimestamp: uint
+  modifiedBy: string
+  allData: string
+  {x}s: mapping(recordId → {x})
+  {x}Ids: array of string
+  {x}Exists: mapping(recordId → bool)
+Result: Updated {x} data stored on-chain; new or modified record reflected in mappings and arrays.
+Event:
+  {x}Stored(recordId: string, createdTimestamp: uint, modifiedTimestamp: uint)
+  {x}Updated(recordId: string, modifiedTimestamp: uint)
+Function store{x}()
+  Input: recordId, createdTimestamp, modifiedTimestamp, modifiedBy, allData
+  Check if recordId already exists ({x}Exists[recordId])
+  Store/overwrite {x} data in mapping {x}s[recordId]
+  If {x} is new:
+     a. Append recordId to {x}Ids
+     b. Mark {x}Exists[recordId] = true
+     c. Emit {x}Stored event
+  Else:
+     a. Emit {x}Updated event
+  Return true
+
+x = employee || attendance
+
+
+
+Algorithm 1. Smart contract: {x}Storage
+x = employee || attendance
+Data: Initialize
+recordId: string
+createdTimestamp: uint
+modifiedTimestamp: uint
+modifiedBy: string
+allData: string
+Result: Updated {x} record containing recordId, createdTimestamp, modifiedTimestamp, modifiedBy, allData
+Event {x}Stored(recordId: string, createdTimestamp: uint, modifiedTimestamp: uint) {x}Updated(recordId: string, modifiedTimestamp: uint)
+Function store{x}():
+  Set recordId;
+  Set createdTimestamp;
+  Set modifiedTimestamp;
+  Set modifiedBy;
+  Set allData;
+  If new record → Emit {x}Stored event
+  Else → Emit {x}Updated event

@@ -1,0 +1,75 @@
+# working with truffle and besu
+
+# ============================================
+# WORKFLOW WITH CONTRACT REGISTRY
+# ============================================
+
+# 1. First deployment (fresh start)
+truffle migrate --reset --network besu
+
+# 2. Add new contract to migration array
+# Edit migrations/2_deploy_contracts.js and add contract to array
+# Then run:
+truffle migrate --reset --network besu
+# ContractRegistry will skip already deployed contracts and deploy only new ones
+
+# 3. Update specific contract(s) only
+# Use when you modified code for specific contracts and want to redeploy only those
+REDEPLOY_ONLY="DocumentCertificate" truffle migrate --reset --network besu
+
+# Multiple contracts (comma-separated, no spaces):
+REDEPLOY_ONLY="DocumentCertificate,SimpleStorage" truffle migrate --reset --network besu
+
+# 4. Force redeploy ALL contracts (updates addresses in registry, keeps history)
+FORCE_REDEPLOY=true truffle migrate --reset --network besu
+
+# 5. Nuclear option - wipe blockchain and start completely fresh
+cd ../backend/blockchain-besu
+docker-compose down -v
+rm -rf ../Node-*/data/database/*
+docker-compose up -d
+cd ../../API
+truffle migrate --reset --network besu
+
+# ============================================
+# STANDARD COMMANDS
+# ============================================
+
+# Deploy only new migrations (first time)
+truffle migrate --network besu
+
+# Redeploy all migrations (for adding new contracts)
+truffle migrate --reset --network besu
+
+# Deploy specific migration
+truffle migrate --f 2 --to 2 --network besu
+
+# Clean and recompile
+rm -rf build/
+truffle compile
+
+# Compile only (no deployment)
+truffle compile
+
+# ============================================
+# CHECK DEPLOYED CONTRACTS
+# ============================================
+
+# To see deployed contract addresses, check build/contracts/*.json and look for "networks"
+cat build/contracts/ContractRegistry.json | grep -A 5 '"networks"'
+cat build/contracts/DocumentCertificate.json | grep -A 5 '"networks"'
+
+# ============================================
+# NOTES
+# ============================================
+
+# ContractRegistry tracks individual contracts and their version history
+# Migrations.sol tracks which migration files have been executed
+# Use REDEPLOY_ONLY="ContractName" to update specific contracts after code changes
+# Use FORCE_REDEPLOY=true to update ALL contracts while preserving registry history
+# ContractRegistry stores all previous addresses for each contract
+
+# Deployment modes:
+# - Normal: Deploy only new contracts not yet in registry
+# - REDEPLOY_ONLY: Deploy only specified contracts (ignores others)
+# - FORCE_REDEPLOY: Deploy all contracts regardless of registry status

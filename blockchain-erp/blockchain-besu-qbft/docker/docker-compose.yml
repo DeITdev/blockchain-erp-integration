@@ -1,0 +1,178 @@
+name: blockchain-besu-qbft
+
+services:
+  # Bootstrap/Bootnode (Node-1)
+  node-1:
+    container_name: qbft-node-1
+    image: hyperledger/besu:25.7.0
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-1/data:/opt/besu/data
+    ports:
+      - "9545:9545"
+    networks:
+      qbft-network:
+        ipv4_address: 172.16.240.11
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,QBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --rpc-http-port=9545
+      --rpc-http-cors-origins="*"
+      --rpc-http-host=0.0.0.0
+      --host-allowlist="*"
+      --profile=ENTERPRISE
+      --network-id=1337
+      --revert-reason-enabled=true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-2
+  node-2:
+    container_name: qbft-node-2
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-2/data:/opt/besu/data
+    ports:
+      - "9546:9546"
+    networks:
+      qbft-network:
+        ipv4_address: 172.16.240.12
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,QBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --rpc-http-port=9546
+      --rpc-http-cors-origins="*"
+      --rpc-http-host=0.0.0.0
+      --host-allowlist="*"
+      --profile=ENTERPRISE
+      --network-id=1337
+      --revert-reason-enabled=true
+      --p2p-port=30304
+      --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@172.16.240.11:30303
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-3
+  node-3:
+    container_name: qbft-node-3
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-3/data:/opt/besu/data
+    ports:
+      - "9547:9547"
+    networks:
+      qbft-network:
+        ipv4_address: 172.16.240.13
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,QBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --rpc-http-port=9547
+      --rpc-http-cors-origins="*"
+      --rpc-http-host=0.0.0.0
+      --host-allowlist="*"
+      --profile=ENTERPRISE
+      --network-id=1337
+      --revert-reason-enabled=true
+      --p2p-port=30305
+      --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@172.16.240.11:30303
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Node-4
+  node-4:
+    container_name: qbft-node-4
+    image: hyperledger/besu:25.7.0
+    depends_on:
+      node-1:
+        condition: service_healthy
+    volumes:
+      - ../genesis.json:/opt/besu/genesis.json
+      - ../Node-4/data:/opt/besu/data
+    ports:
+      - "9548:9548"
+    networks:
+      qbft-network:
+        ipv4_address: 172.16.240.14
+    command: >
+      --data-path=/opt/besu/data
+      --genesis-file=/opt/besu/genesis.json
+      --rpc-http-enabled=true
+      --rpc-http-api=ETH,NET,IBFT,QBFT,WEB3,DEBUG,ADMIN,TXPOOL
+      --rpc-http-port=9548
+      --rpc-http-cors-origins="*"
+      --rpc-http-host=0.0.0.0
+      --host-allowlist="*"
+      --profile=ENTERPRISE
+      --network-id=1337
+      --revert-reason-enabled=true
+      --p2p-port=30306
+      --bootnodes=enode://8a1cdd0a59a1898233aa150f6de42962c6f0138ac0c0074e97f39366c4d3ff7143108feb0a59964a91925c143263f5dc42e47efa41bc0bed7eb901dc416a57a8@172.16.240.11:30303
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ls", "/opt/besu/data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Quorum Explorer
+  quorum-explorer:
+    container_name: qbft-quorum-explorer
+    image: consensys/quorum-explorer:latest
+    depends_on:
+      node-1:
+        condition: service_healthy
+      node-2:
+        condition: service_healthy
+      node-3:
+        condition: service_healthy
+      node-4:
+        condition: service_healthy
+    ports:
+      - "25001:25000/tcp"
+    networks:
+      qbft-network:
+        ipv4_address: 172.16.240.15
+    environment:
+      - QE_CONFIG_PATH=/app/config.json
+      - NODE_ENV=production
+      - DISABLE_AUTH=true
+    volumes:
+      - ./qbft-explorer-config.json:/app/config.json
+    restart: unless-stopped
+
+networks:
+  qbft-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.16.240.0/24

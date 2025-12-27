@@ -1,0 +1,25 @@
+{
+  "algorithm": "qbft",
+  "nodes": [
+    {
+      "name": "Node1 (Boot)",
+      "client": "besu",
+      "rpcUrl": "http://172.16.240.11:9545"
+    },
+    {
+      "name": "Node2",
+      "client": "besu",
+      "rpcUrl": "http://172.16.240.12:9546"
+    },
+    {
+      "name": "Node3",
+      "client": "besu",
+      "rpcUrl": "http://172.16.240.13:9547"
+    },
+    {
+      "name": "Node4",
+      "client": "besu",
+      "rpcUrl": "http://172.16.240.14:9548"
+    }
+  ]
+}
