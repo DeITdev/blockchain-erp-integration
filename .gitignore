@@ -10,3 +10,4 @@ auth.txt
 cdc_events_log.json
 .idea
 .log
+.venv

@@ -18,7 +18,7 @@ import sys
 
 def load_env_file():
     """Load environment variables from .env file"""
-    env_path = Path(__file__).parent.parent.parent / '.env'
+    env_path = Path(__file__).parent.parent.parent.parent / '.env.local'
     if env_path.exists():
         with open(env_path, 'r') as f:
             for line in f:
