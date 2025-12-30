@@ -625,7 +625,7 @@
   "sourceMap": "75:314:6:-:0;;;100:33;;;-1:-1:-1;;;;;;100:33:6;123:10;100:33;;;75:314;;;;;;;;;;;;;;;;",
   "deployedSourceMap": "75:314:6:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;138:36;;;;;;;;;160:25:8;;;148:2;133:18;138:36:6;;;;;;;;100:33;;;;;-1:-1:-1;;;;;100:33:6;;;;;;-1:-1:-1;;;;;360:32:8;;;342:51;;330:2;315:18;100:33:6;196:203:8;281:105:6;;;;;;:::i;:::-;;:::i;:::-;;;232:5;;-1:-1:-1;;;;;232:5:6;218:10;:19;210:51;;;;-1:-1:-1;;;210:51:6;;791:2:8;210:51:6;;;773:21:8;830:2;810:18;;;803:30;-1:-1:-1;;;849:18:8;;;842:49;908:18;;210:51:6;;;;;;;;344:24:::1;:36:::0;281:105::o;404:180:8:-;463:6;516:2;504:9;495:7;491:23;487:32;484:52;;;532:1;529;522:12;484:52;-1:-1:-1;555:23:8;;404:180;-1:-1:-1;404:180:8:o",
   "source": "// SPDX-License-Identifier: GPL-3.0\r\n\r\npragma solidity >=0.4.22 <0.9.0;\r\n\r\ncontract Migrations {\r\n  address public owner = msg.sender;\r\n  uint public last_completed_migration;\r\n\r\n  modifier restricted() {\r\n    require(msg.sender == owner, \"Restricted to owner\");\r\n    _;\r\n  }\r\n\r\n  function setCompleted(uint completed) public restricted {\r\n    last_completed_migration = completed;\r\n  }\r\n}",
-  "sourcePath": "/home/danarit/Projects/blockchain-erp-integration/blockchain/API/contracts/Migrations.sol",
+  "sourcePath": "/home/danarit/Projects/blockchain-erp-integration/blockchain-erp/API/contracts/Migrations.sol",
   "ast": {
     "absolutePath": "project:/contracts/Migrations.sol",
     "exportedSymbols": {
@@ -1031,12 +1031,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0x9a3DBCa554e9f6b9257aAa24010DA8377C57c17e",
-      "transactionHash": "0xcf905a9bc23041505439ea3e06c33f89d9d14199405a0455125defd763d94710"
+      "address": "0xae7171FCa2c8CB18DDB0d906c14357Bae9790ac6",
+      "transactionHash": "0x4a993d3f5fc0bef115e32a70b5e122360c3156ad87f949c77a0fd828ebb6ca20"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-21T15:57:42.525Z",
+  "updatedAt": "2025-12-29T17:04:26.565Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

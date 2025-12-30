@@ -286,7 +286,7 @@
   "sourceMap": "74:213:7:-:0;;;;;;;;;;;;;;;;;;;",
   "deployedSourceMap": "74:213:7:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;203:81;244:7;270:6;203:81;;160:25:8;;;148:2;133:18;203:81:7;;;;;;;129:66;;;;;;:::i;:::-;175:6;:12;129:66;;;196:180:8;255:6;308:2;296:9;287:7;283:23;279:32;276:52;;;324:1;321;314:12;276:52;-1:-1:-1;347:23:8;;196:180;-1:-1:-1;196:180:8:o",
   "source": "// SPDX-License-Identifier: GPL-3.0\r\n\r\npragma solidity >=0.8.2 <0.9.0;\r\n\r\ncontract SimpleStorage {\r\n\r\n    uint256 number;\r\n\r\n    function store(uint256 num) public {\r\n        number = num;\r\n    }\r\n\r\n    function retrieve() public view returns (uint256){\r\n        return number;\r\n    }\r\n}",
-  "sourcePath": "/home/danarit/Projects/blockchain-erp-integration/blockchain/API/contracts/SimpleStorage.sol",
+  "sourcePath": "/home/danarit/Projects/blockchain-erp-integration/blockchain-erp/API/contracts/SimpleStorage.sol",
   "ast": {
     "absolutePath": "project:/contracts/SimpleStorage.sol",
     "exportedSymbols": {
@@ -555,12 +555,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0xe135783649BfA7c9c4c6F8E528C7f56166efC8a6",
-      "transactionHash": "0x8cb2b8eefea7abc79010eb492c132506e8976bdaaecdd0d79c72722252a7eafa"
+      "address": "0x92EFC062c4257AB890fA964Da0381f0E8D689496",
+      "transactionHash": "0x9cdf6881036f9c05472bab1e6017bb3f34dcc26c3e0f8b68ad30bde07739393d"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-21T15:57:42.493Z",
+  "updatedAt": "2025-12-29T17:04:26.527Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

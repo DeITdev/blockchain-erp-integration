@@ -65,11 +65,9 @@ function generateConnectorConfig(dbName, tables) {
   // Build table include list
   const tableList = tables.map(t => `${dbName}.${t}`).join(',');
 
-  // Generate unique server ID
-  const serverIdBase = Math.abs(dbName.split('').reduce((hash, char) => {
-    return ((hash << 5) - hash) + char.charCodeAt(0);
-  }, 0));
-  const serverId = 184000 + (serverIdBase % 1000);
+  // Generate UNIQUE server ID for each deployment (prevents state conflicts after clearing)
+  // Using timestamp ensures each run gets a fresh ID, so Debezium treats it as a new connector
+  const serverId = 184000 + (Date.now() % 100000);
 
   return {
     name: 'erpnext-cdc-connector',
@@ -88,12 +86,13 @@ function generateConnectorConfig(dbName, tables) {
       'schema.history.internal.kafka.topic': `schema-changes.${TOPIC_PREFIX}`,
       'schema.history.internal.consumer.security.protocol': 'PLAINTEXT',
       'schema.history.internal.producer.security.protocol': 'PLAINTEXT',
-      'include.schema.changes': 'true',
+      'schema.history.internal.store.only.captured.tables.ddl': 'true',
+      'include.schema.changes': 'false',
       'transforms': 'unwrap',
       'transforms.unwrap.type': 'io.debezium.transforms.ExtractNewRecordState',
       'transforms.unwrap.drop.tombstones': 'false',
       'transforms.unwrap.delete.handling.mode': 'rewrite',
-      'snapshot.mode': 'initial',
+      'snapshot.mode': 'when_needed',
       'snapshot.locking.mode': 'none',
       'database.allowPublicKeyRetrieval': 'true',
       'decimal.handling.mode': 'string',

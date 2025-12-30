@@ -11,7 +11,8 @@ uploads/
 *.log
 
 # Build artifacts (keep for deployment reference)
-# build/
+build/
+contracts/
 
 # IDE
 .vscode/

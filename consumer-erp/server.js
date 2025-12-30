@@ -18,9 +18,12 @@ const TOPIC_PREFIX = process.env.TOPIC_PREFIX || 'erpnext';
 const TARGET_TABLES = (process.env.TARGET_TABLES || 'tabEmployee,tabAttendance').split(',').map(t => t.trim());
 
 // Batch processing settings
-const BATCH_SIZE = parseInt(process.env.BATCH_SIZE) || 10;
-const BATCH_TIMEOUT = parseInt(process.env.BATCH_TIMEOUT) || 100;
-const MAX_CONCURRENT_REQUESTS = parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 5;
+const BATCH_SIZE = parseInt(process.env.BATCH_SIZE) || 50; // Increased for better throughput
+const BATCH_TIMEOUT = parseInt(process.env.BATCH_TIMEOUT) || 50; // Faster batch processing
+const MAX_CONCURRENT_REQUESTS = parseInt(process.env.MAX_CONCURRENT_REQUESTS) || 10; // Increased concurrency
+
+// Performance optimization settings
+const SKIP_BLOCKCHAIN_CHECK = process.env.SKIP_BLOCKCHAIN_CHECK === 'true'; // Skip existence check for bulk
 
 // Deduplication settings
 const DEDUP_WINDOW_MS = parseInt(process.env.DEDUP_WINDOW_MS) || 10000;
@@ -45,8 +48,8 @@ const kafka = new Kafka({
 
 const consumer = kafka.consumer({
   groupId: 'blockchain-consumer-group',
-  sessionTimeout: 30000,
-  heartbeatInterval: 3000,
+  sessionTimeout: 120000,  // Increased to 2 minutes for long blockchain transactions
+  heartbeatInterval: 10000, // Increased heartbeat interval
   maxWaitTimeInMs: 1000
 });
 
@@ -79,27 +82,48 @@ class ConcurrencyLimiter {
 const concurrencyLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_REQUESTS);
 
 /**
- * Check for duplicate records
+ * Create a hash of the record data for content-based deduplication
  */
-function shouldSkipDuplicate(recordId, modifiedTimestamp) {
+function createContentHash(recordId, data) {
+  const crypto = require('crypto');
+  // Create a hash from recordId + stringified data
+  const content = recordId + JSON.stringify(data);
+  return crypto.createHash('md5').update(content).digest('hex');
+}
+
+/**
+ * Check for duplicate records - uses content hash to detect identical messages
+ */
+function shouldSkipDuplicate(recordId, data, modifiedTimestamp) {
   const now = Date.now();
+  const contentHash = createContentHash(recordId, data);
 
   // Clean old entries
-  for (const [key, data] of recentRecords.entries()) {
-    if (now - data.timestamp > DEDUP_WINDOW_MS) {
+  for (const [key, entry] of recentRecords.entries()) {
+    if (now - entry.timestamp > DEDUP_WINDOW_MS) {
       recentRecords.delete(key);
     }
   }
 
-  if (recentRecords.has(recordId)) {
-    const existing = recentRecords.get(recordId);
+  // Check if we've seen this exact content before
+  const cacheKey = `${recordId}:${contentHash}`;
+  if (recentRecords.has(cacheKey)) {
+    return true; // Exact same content, skip it
+  }
+
+  // Also check by recordId + timestamp (for near-duplicate detection)
+  const recordKey = recordId;
+  if (recentRecords.has(recordKey)) {
+    const existing = recentRecords.get(recordKey);
     const timeDiff = Math.abs(new Date(modifiedTimestamp).getTime() - new Date(existing.modifiedTimestamp).getTime());
-    if (timeDiff < 5000) {
+    if (timeDiff < 1000) { // Within 1 second = likely duplicate
       return true;
     }
   }
 
-  recentRecords.set(recordId, { timestamp: now, modifiedTimestamp });
+  // Store both the content hash key and recordId key
+  recentRecords.set(cacheKey, { timestamp: now, modifiedTimestamp });
+  recentRecords.set(recordKey, { timestamp: now, modifiedTimestamp, contentHash });
   return false;
 }
 
@@ -112,6 +136,47 @@ function getEndpoint(tableName) {
     'tabAttendance': '/attendances'
   };
   return endpoints[tableName] || `/${tableName.toLowerCase()}`;
+}
+
+/**
+ * Check if record already exists in blockchain
+ * Returns: { exists: boolean, needsUpdate: boolean, existingData: object|null }
+ */
+async function checkBlockchainRecord(endpoint, recordId) {
+  try {
+    const response = await axios.get(`${API_ENDPOINT}${endpoint}/${recordId}`, {
+      timeout: 10000
+    });
+
+    if (response.data.success) {
+      return {
+        exists: true,
+        existingData: response.data
+      };
+    }
+    return { exists: false, existingData: null };
+  } catch (error) {
+    // 404 or error means record doesn't exist
+    return { exists: false, existingData: null };
+  }
+}
+
+/**
+ * Check if we should skip writing to blockchain
+ * For initial snapshot: skip if record exists and has same or newer timestamp
+ */
+function shouldSkipExisting(existingData, newTimestamp) {
+  if (!existingData) return false;
+
+  const existingTimestamp = existingData.modifiedTimestamp;
+  if (!existingTimestamp) return false;
+
+  // Convert to numbers for comparison
+  const existingTs = typeof existingTimestamp === 'string' ? parseInt(existingTimestamp) : existingTimestamp;
+  const newTs = typeof newTimestamp === 'string' ? parseInt(newTimestamp) : newTimestamp;
+
+  // Skip if existing record is same or newer
+  return existingTs >= newTs;
 }
 
 /**
@@ -178,7 +243,7 @@ async function sendToBlockchain(endpoint, transformedData) {
       const recordId = transformedData[dataKey]?.recordId;
 
       const response = await axios.post(`${API_ENDPOINT}${endpoint}`, fullPayload, {
-        timeout: 30000,
+        timeout: 60000, // Increased to 60s for slow blockchain transactions
         headers: { 'Content-Type': 'application/json' }
       });
 
@@ -255,15 +320,22 @@ async function processMessage(topic, message) {
 
     // Handle Debezium CDC event structure
     let changeData;
+    let isDelete = false;
+
     if (changeEvent.payload) {
-      changeData = changeEvent.payload.after || changeEvent.payload.before;
+      // For DELETE operations, use 'before' data and mark as delete
       if (changeEvent.payload.op === 'd') {
-        eventCounter++;
-        console.log(`Event #${eventCounter}: ${tableName} DELETE - SKIPPED`);
-        return;
+        isDelete = true;
+        changeData = changeEvent.payload.before;
+      } else {
+        changeData = changeEvent.payload.after || changeEvent.payload.before;
       }
     } else {
       changeData = changeEvent;
+      // Check for delete marker in non-payload format
+      if (changeData.__deleted === 'true' || changeData.__deleted === true) {
+        isDelete = true;
+      }
     }
 
     if (!changeData) {
@@ -277,16 +349,11 @@ async function processMessage(topic, message) {
       return;
     }
 
-    // Check for delete marker
-    if (changeData.__deleted === 'true' || changeData.__deleted === true) {
-      eventCounter++;
-      console.log(`Event #${eventCounter}: ${tableName} ${recordId} DELETE - SKIPPED`);
-      return;
-    }
-
     // Detect operation
     let operation = 'UPDATE';
-    if (changeEvent.payload?.op === 'c') {
+    if (isDelete) {
+      operation = 'DELETE';
+    } else if (changeEvent.payload?.op === 'c') {
       operation = 'CREATE';
     } else if (changeEvent.payload?.op === 'u') {
       operation = 'UPDATE';
@@ -295,8 +362,8 @@ async function processMessage(topic, message) {
     // Get modified timestamp for deduplication
     const modifiedTimestamp = changeData.modified || changeData.modification || new Date().toISOString();
 
-    // Deduplication check
-    if (shouldSkipDuplicate(recordId, modifiedTimestamp)) {
+    // Deduplication check (skip identical messages from same batch)
+    if (shouldSkipDuplicate(recordId, changeData, modifiedTimestamp)) {
       eventCounter++;
       console.log(`Event #${eventCounter}: ${tableName} ${recordId} ${operation} - DUPLICATE`);
       skipped++;
@@ -304,13 +371,52 @@ async function processMessage(topic, message) {
     }
 
     eventCounter++;
-    console.log(`Event #${eventCounter}: ${tableName} ${recordId} ${operation}`);
-
-    // Transform data for blockchain
-    const transformedData = transformForBlockchain(tableName, changeData);
 
     // Get table endpoint
     const tableEndpoint = getEndpoint(tableName);
+
+    // Check if record already exists in blockchain (Option 2: skip if already deployed)
+    // Can be skipped with SKIP_BLOCKCHAIN_CHECK=true for bulk initial sync
+    let exists = false;
+    let existingData = null;
+
+    if (!SKIP_BLOCKCHAIN_CHECK) {
+      const checkResult = await checkBlockchainRecord(tableEndpoint, recordId);
+      exists = checkResult.exists;
+      existingData = checkResult.existingData;
+    }
+
+    if (exists && !isDelete) {
+      // For CREATE/UPDATE: check if we should skip
+      if (shouldSkipExisting(existingData, modifiedTimestamp)) {
+        console.log(`Event #${eventCounter}: ${tableName} ${recordId} ${operation} - ALREADY IN BLOCKCHAIN (skipped)`);
+        skipped++;
+        return;
+      }
+    }
+
+    // For DELETE operations: implement soft delete
+    if (isDelete) {
+      if (!exists) {
+        // Record doesn't exist in blockchain, nothing to soft-delete
+        console.log(`Event #${eventCounter}: ${tableName} ${recordId} DELETE - NOT IN BLOCKCHAIN (skipped)`);
+        skipped++;
+        return;
+      }
+
+      // Add soft delete markers to the data
+      changeData.__deleted = true;
+      changeData.__deletedAt = Date.now() * 1000; // microseconds
+      changeData.__deletedBy = changeData.modified_by || 'cdc-consumer';
+      changeData.status = 'DELETED';
+
+      console.log(`Event #${eventCounter}: ${tableName} ${recordId} SOFT-DELETE`);
+    } else {
+      console.log(`Event #${eventCounter}: ${tableName} ${recordId} ${operation}`);
+    }
+
+    // Transform data for blockchain
+    const transformedData = transformForBlockchain(tableName, changeData);
 
     // Send to blockchain
     const success = await sendToBlockchain(tableEndpoint, transformedData);
@@ -386,17 +492,26 @@ async function start() {
   }
 
   // Discover and subscribe to topics
-  const availableTopics = await discoverTopics();
+  let availableTopics = await discoverTopics();
 
   if (availableTopics.length === 0) {
     console.log('[WARNING] No CDC topics found yet.');
     console.log('  Run: node utils/add-erp-connector.js to create the connector');
-    console.log('  Subscribing to topic pattern...');
-    await consumer.subscribe({ topics: new RegExp(`^${TOPIC_PREFIX}\\..*\\.(${TARGET_TABLES.join('|')})$`), fromBeginning: false });
-  } else {
-    console.log(`[OK] Found ${availableTopics.length} topic(s): ${availableTopics.join(', ')}`);
-    await consumer.subscribe({ topics: availableTopics, fromBeginning: false });
+    console.log('  Waiting for topics to appear...');
+
+    // Poll for topics every 10 seconds until found
+    while (availableTopics.length === 0) {
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      availableTopics = await discoverTopics();
+      if (availableTopics.length === 0) {
+        process.stdout.write('.');
+      }
+    }
+    console.log('\n[OK] Topics found!');
   }
+
+  console.log(`[OK] Found ${availableTopics.length} topic(s): ${availableTopics.join(', ')}`);
+  await consumer.subscribe({ topics: availableTopics, fromBeginning: false });
 
   // Start consumer
   await consumer.run({
