@@ -10,6 +10,7 @@ import json
 import random
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 import sys
@@ -88,6 +89,7 @@ class EmployeeGenderUpdater:
         self.api = ERPNextAPI()
         self.updated_count = 0
         self.failed_count = 0
+        self.start_time = None
 
     def fetch_all_employees(self) -> List[Dict]:
         """Fetch all employees with their gender"""
@@ -134,6 +136,10 @@ class EmployeeGenderUpdater:
             new_gender = self.toggle_gender(current_gender)
             
             try:
+                # Start timer on first API call
+                if self.start_time is None:
+                    self.start_time = time.time()
+                    logger.info("[TIMER] Started")
                 self.api.update_doc("Employee", emp_name, {"gender": new_gender})
                 self.updated_count += 1
                 logger.info(f"[{i}/{num_to_update}] {emp_name} ({emp_display}): {current_gender} -> {new_gender}")
@@ -144,6 +150,9 @@ class EmployeeGenderUpdater:
         logger.info("-" * 50)
         logger.info(f"Updated: {self.updated_count}")
         logger.info(f"Failed: {self.failed_count}")
+        if self.start_time:
+            elapsed = time.time() - self.start_time
+            logger.info(f"Elapsed Time: {elapsed:.2f} seconds")
         logger.info(f"\nThis should generate {self.updated_count} CDC event(s)")
 
     def run(self, num_to_update: int):

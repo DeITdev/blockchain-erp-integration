@@ -326,7 +326,7 @@ app.get("/read", async (req, res) => {
       value: cleanResult
     });
   } catch (error) {
-    console.error("[ERROR] Read error:", error.message);
+    console.log("[INFO] Read error:", error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -368,6 +368,45 @@ app.get("/contracts/deployed", async (req, res) => {
   }
 });
 
-app.listen(4000, () => {
-  console.log("Server started on http://localhost:4000");
-});
+// Check if Besu blockchain is running
+async function checkBesuConnection() {
+  const Web3 = require('web3');
+  const BLOCKCHAIN_URL = process.env.BLOCKCHAIN_URL || 'http://localhost:8545';
+  const web3 = new Web3(BLOCKCHAIN_URL);
+
+  try {
+    const blockNumber = await web3.eth.getBlockNumber();
+    const chainId = await web3.eth.getChainId();
+    console.log(`[OK] Connected to Besu blockchain`);
+    console.log(`     URL: ${BLOCKCHAIN_URL}`);
+    console.log(`     Chain ID: ${chainId}`);
+    console.log(`     Current Block: ${blockNumber}`);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+// Startup function with Besu check
+async function startServer() {
+  const BLOCKCHAIN_URL = process.env.BLOCKCHAIN_URL || 'http://localhost:8545';
+
+  console.log('\n[...] Checking Besu blockchain connection...');
+
+  let connected = await checkBesuConnection();
+
+  while (!connected) {
+    console.log(`[X] Besu not reachable at ${BLOCKCHAIN_URL}`);
+    console.log('    Please start the Besu blockchain and try again.');
+    console.log('    Retrying in 5 seconds...\n');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    connected = await checkBesuConnection();
+  }
+
+  // Start Express server
+  app.listen(4000, () => {
+    console.log('\n[OK] Server started on http://localhost:4000');
+  });
+}
+
+startServer();

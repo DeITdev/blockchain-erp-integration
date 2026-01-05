@@ -7,7 +7,7 @@
     "database.port": "3306",
     "database.user": "root",
     "database.password": "admin",
-    "database.server.id": "283937",
+    "database.server.id": "225990",
     "topic.prefix": "erpnext",
     "database.include.list": "_1f2b3e1ef71e8d5b",
     "table.include.list": "_1f2b3e1ef71e8d5b.tabEmployee,_1f2b3e1ef71e8d5b.tabAttendance",

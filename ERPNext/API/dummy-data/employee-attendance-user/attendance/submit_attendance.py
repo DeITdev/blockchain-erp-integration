@@ -75,31 +75,35 @@ class AttendanceSubmitter:
         self.api = API()
         self.submitted = 0
         self.failed = 0
+        self.start_time = None
 
-    def submit_attendance(self):
+    def get_draft_records(self):
+        """Fetch draft attendance records"""
         logger.info("Fetching draft attendance records...")
+        attendance_list = self.api.get_list(
+            "Attendance", {"docstatus": 0, "company": COMPANY})
+        logger.info(
+            f"Found {len(attendance_list)} draft records for {COMPANY}")
+        return attendance_list
+
+    def submit_attendance(self, records_to_submit):
+        """Submit specified attendance records"""
         try:
-            # Filter by company to avoid submitting records from other companies
-            attendance_list = self.api.get_list(
-                "Attendance", {"docstatus": 0, "company": COMPANY})
-            logger.info(
-                f"Found {len(attendance_list)} draft records for {COMPANY}")
-
-            if not attendance_list:
-                logger.info("No draft records to submit")
-                return
-
-            for i, record in enumerate(attendance_list):
+            for i, record in enumerate(records_to_submit):
                 att_name = record.get("name")
                 emp = record.get("employee", "Unknown")
                 date = record.get("attendance_date", "Unknown")
-                progress_pct = ((i + 1) / len(attendance_list)) * 100
+                progress_pct = ((i + 1) / len(records_to_submit)) * 100
 
                 try:
+                    # Start timer on first API call
+                    if self.start_time is None:
+                        self.start_time = time.time()
+                        logger.info("[TIMER] Started")
                     self.api.submit("Attendance", att_name)
                     self.submitted += 1
                     logger.info(
-                        f"[{i+1}/{len(attendance_list)}] ({progress_pct:.0f}%) Submitted: {emp} - {date}")
+                        f"[{i+1}/{len(records_to_submit)}] ({progress_pct:.0f}%) Submitted: {emp} - {date}")
                 except Exception as e:
                     error_msg = str(e)
                     if "TimestampMismatchError" in error_msg or "has been modified" in error_msg:
@@ -110,7 +114,7 @@ class AttendanceSubmitter:
                             self.api.submit("Attendance", att_name)
                             self.submitted += 1
                             logger.info(
-                                f"[{i+1}/{len(attendance_list)}] ({progress_pct:.0f}%) Submitted (retry): {emp} - {date}")
+                                f"[{i+1}/{len(records_to_submit)}] ({progress_pct:.0f}%) Submitted (retry): {emp} - {date}")
                         except Exception as retry_e:
                             self.failed += 1
                             logger.error(
@@ -119,13 +123,17 @@ class AttendanceSubmitter:
                         self.failed += 1
                         logger.error(f"Failed {att_name}: {error_msg[:80]}")
 
+            elapsed_str = ""
+            if self.start_time:
+                elapsed = time.time() - self.start_time
+                elapsed_str = f", Elapsed: {elapsed:.2f}s"
             logger.info(
-                f"Summary: Submitted {self.submitted}, Failed {self.failed}")
+                f"Summary: Submitted {self.submitted}, Failed {self.failed}{elapsed_str}")
         except Exception as e:
             logger.error(f"Error: {e}")
 
-    def run(self):
-        self.submit_attendance()
+    def run(self, records_to_submit):
+        self.submit_attendance(records_to_submit)
 
 
 def main():
@@ -133,14 +141,41 @@ def main():
         logger.error("API_KEY and API_SECRET required in .env")
         return
 
-    confirm = input("Submit all draft attendance records? (yes/no): ")
-    if confirm.lower() != 'yes':
-        logger.info("Cancelled")
-        return
-
     try:
         submitter = AttendanceSubmitter()
-        submitter.run()
+        attendance_list = submitter.get_draft_records()
+
+        if not attendance_list:
+            print("\n⚠️  No draft records found to submit.")
+            print("    (Draft records have docstatus=0)")
+            print("    Try running generate_attendance.py first.")
+            return
+
+        # Ask user how many to submit
+        total = len(attendance_list)
+        while True:
+            try:
+                count_input = input(f"How many records to submit? (1-{total}, or 'all'): ").strip().lower()
+                if count_input == 'all':
+                    num_to_submit = total
+                    break
+                num_to_submit = int(count_input)
+                if 1 <= num_to_submit <= total:
+                    break
+                else:
+                    print(f"Please enter a number between 1 and {total}")
+            except ValueError:
+                print("Invalid input. Enter a number or 'all'")
+
+        # Select records to submit
+        records_to_submit = attendance_list[:num_to_submit]
+
+        confirm = input(f"Type 'SUBMIT' to confirm submitting {num_to_submit} record(s): ")
+        if confirm != 'SUBMIT':
+            logger.info("Cancelled")
+            return
+
+        submitter.run(records_to_submit)
     except Exception as e:
         logger.error(f"Error: {e}")
 

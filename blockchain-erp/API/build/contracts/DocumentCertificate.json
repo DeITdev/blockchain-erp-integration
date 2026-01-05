@@ -8648,12 +8648,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0xE2d7aE0A81d7E2b4C14fE2a29D71a3db829B1C32",
-      "transactionHash": "0xa5893c68e3efa4e9470105a4de967302934a4e5c637da3784ed76ac9d62fd3cb"
+      "address": "0x35efDE4F848f4DBc4DC3560960f490844345556f",
+      "transactionHash": "0x981c239ce7446a421443252880078877d32959faf8d2e9a08b1f5f7c32bb32ae"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-29T17:04:26.524Z",
+  "updatedAt": "2026-01-02T11:58:22.144Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

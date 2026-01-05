@@ -46,7 +46,8 @@ const metrics = {
     uniqueEvents: 0,
     duplicatesSkipped: 0,
     dbToKafka: { sum: 0, count: 0 },
-    kafkaToConsumer: { sum: 0, count: 0 },
+    queueTime: { sum: 0, count: 0 },        // Total wait in Kafka queue
+    kafkaToConsumer: { sum: 0, count: 0 },   // Pure delivery time (after consumer ready)
     consumerToBlockchain: { sum: 0, count: 0 }
   }
 };
@@ -176,6 +177,13 @@ async function sendToBlockchain(endpoint, transformedData, recordId, newTimestam
 function printStats() {
   const summary = metrics.summary;
   const count = summary.uniqueEvents;
+
+  // Timer not started yet (no events received)
+  if (metrics.startTime === null) {
+    console.log(`\n[STATS] Waiting for first event to start timer...\n`);
+    return;
+  }
+
   const runtimeSeconds = (Date.now() - metrics.startTime) / 1000;
 
   if (count === 0) {
@@ -184,23 +192,24 @@ function printStats() {
   }
 
   const avgDbKafka = (summary.dbToKafka.sum / summary.dbToKafka.count / 1000).toFixed(3);
+  const avgQueueTime = (summary.queueTime.sum / summary.queueTime.count / 1000).toFixed(3);
   const avgKafkaConsumer = (summary.kafkaToConsumer.sum / summary.kafkaToConsumer.count / 1000).toFixed(3);
   const avgConsumerBlockchain = (summary.consumerToBlockchain.sum / summary.consumerToBlockchain.count / 1000).toFixed(3);
   const avgTotal = (parseFloat(avgDbKafka) + parseFloat(avgKafkaConsumer) + parseFloat(avgConsumerBlockchain)).toFixed(3);
 
-  console.log('\n' + '='.repeat(60));
+  console.log('\n' + '='.repeat(70));
   console.log(`PERFORMANCE METRICS (Runtime: ${runtimeSeconds.toFixed(0)}s | Unique: ${count} | Skipped: ${summary.duplicatesSkipped})`);
-  console.log('='.repeat(60));
+  console.log('='.repeat(70));
   console.log(`| Metric                     | Average (s) |`);
   console.log(`|----------------------------|-------------|`);
-  // DB to Kafka in seconds (convert from ms)
   const avgDbKafkaSec = (summary.dbToKafka.sum / summary.dbToKafka.count / 1000).toFixed(3);
   console.log(`| DB to Kafka (s)            | ${avgDbKafkaSec.padStart(11)} |`);
+  console.log(`| Queue Time (s)             | ${avgQueueTime.padStart(11)} |`);
   console.log(`| Kafka to Consumer (s)      | ${avgKafkaConsumer.padStart(11)} |`);
   console.log(`| Consumer to Blockchain (s) | ${avgConsumerBlockchain.padStart(11)} |`);
   console.log(`|----------------------------|-------------|`);
   console.log(`| Total Time (s)             | ${avgTotal.padStart(11)} |`);
-  console.log('='.repeat(60));
+  console.log('='.repeat(70));
   console.log(`Throughput: ${(count / runtimeSeconds).toFixed(2)} events/sec\n`);
 }
 
@@ -211,11 +220,19 @@ function printFinalSummary() {
   const summary = metrics.summary;
   const count = summary.uniqueEvents;
   const totalEvents = summary.totalEvents;
-  const runtimeSeconds = (Date.now() - metrics.startTime) / 1000;
 
   console.log('\n\n' + '='.repeat(70));
   console.log('FINAL PERFORMANCE REPORT');
   console.log('='.repeat(70));
+
+  // Handle case when no events were received
+  if (metrics.startTime === null) {
+    console.log('\nNo events were received during this session.');
+    console.log('='.repeat(70));
+    return;
+  }
+
+  const runtimeSeconds = (Date.now() - metrics.startTime) / 1000;
 
   console.log(`\nTest Duration: ${runtimeSeconds.toFixed(1)} seconds`);
   console.log(`Total Kafka Events: ${totalEvents} (Unique: ${count}, Duplicates Skipped: ${summary.duplicatesSkipped})`);
@@ -223,6 +240,7 @@ function printFinalSummary() {
 
   if (count > 0) {
     const avgDbKafka = (summary.dbToKafka.sum / summary.dbToKafka.count / 1000).toFixed(3);
+    const avgQueueTime = (summary.queueTime.sum / summary.queueTime.count / 1000).toFixed(3);
     const avgKafkaConsumer = (summary.kafkaToConsumer.sum / summary.kafkaToConsumer.count / 1000).toFixed(3);
     const avgConsumerBlockchain = (summary.consumerToBlockchain.sum / summary.consumerToBlockchain.count / 1000).toFixed(3);
     const avgTotal = (parseFloat(avgDbKafka) + parseFloat(avgKafkaConsumer) + parseFloat(avgConsumerBlockchain)).toFixed(3);
@@ -230,9 +248,9 @@ function printFinalSummary() {
     console.log('\n--- Latency Summary ---\n');
     console.log(`| Metric                     | Average (s) |`);
     console.log(`|----------------------------|-------------|`);
-    // DB to Kafka in seconds (convert from ms)
     const avgDbKafkaSec = (summary.dbToKafka.sum / summary.dbToKafka.count / 1000).toFixed(3);
     console.log(`| DB to Kafka (s)            | ${avgDbKafkaSec.padStart(11)} |`);
+    console.log(`| Queue Time (s)             | ${avgQueueTime.padStart(11)} |`);
     console.log(`| Kafka to Consumer (s)      | ${avgKafkaConsumer.padStart(11)} |`);
     console.log(`| Consumer to Blockchain (s) | ${avgConsumerBlockchain.padStart(11)} |`);
     console.log(`|----------------------------|-------------|`);
@@ -322,6 +340,12 @@ async function processMessage(topic, message) {
 
     metrics.summary.uniqueEvents++;
 
+    // Start timer on first event (not at script startup)
+    if (metrics.startTime === null) {
+      metrics.startTime = Date.now();
+      console.log(`\n[OK] First event received - Timer started at ${new Date().toISOString()}\n`);
+    }
+
     // Extract DB event timestamp - use the record's modified field from ERPNext
     // This is the actual database modification time
     // We'll work in MICROSECONDS for precision, then convert for display
@@ -369,17 +393,13 @@ async function processMessage(topic, message) {
     const adjustedDbTimeMicros = dbEventTimeMicros - TIMEZONE_OFFSET_MICROS;
     const dbToKafkaLatencyMicros = Math.max(0, kafkaTimestampMicros - adjustedDbTimeMicros);
     const dbToKafkaLatency = dbToKafkaLatencyMicros / 1000; // Convert to ms for storage
-    // Kafka to Consumer: measure time from when consumer was READY to receive
-    // If lastProcessingEndTime is null (first message), use consumerReceiveTime - kafkaTimestamp
-    // Otherwise, measure from when previous processing ended (excludes queue time while busy)
-    let kafkaToConsumerLatency;
-    if (lastProcessingEndTime === null) {
-      // First message - use traditional calculation
-      kafkaToConsumerLatency = Math.max(0, consumerReceiveTime - kafkaTimestamp);
-    } else {
-      // Subsequent messages - measure from when we finished previous message
-      kafkaToConsumerLatency = Math.max(0, consumerReceiveTime - lastProcessingEndTime);
-    }
+
+    // Queue Time: total wait from Kafka production to consumption (includes consumer busy time)
+    const queueTime = Math.max(0, consumerReceiveTime - kafkaTimestamp);
+
+    // Kafka to Consumer: time from when Kafka received the message to when consumer received it
+    // This is the same as queue time - the actual delivery latency
+    const kafkaToConsumerLatency = queueTime;
 
     // Send to blockchain and measure time
     const endpoint = getEndpoint(tableName);
@@ -395,6 +415,8 @@ async function processMessage(topic, message) {
     metrics.summary.totalEvents++;
     metrics.summary.dbToKafka.sum += dbToKafkaLatency;
     metrics.summary.dbToKafka.count++;
+    metrics.summary.queueTime.sum += queueTime;
+    metrics.summary.queueTime.count++;
     metrics.summary.kafkaToConsumer.sum += kafkaToConsumerLatency;
     metrics.summary.kafkaToConsumer.count++;
     metrics.summary.consumerToBlockchain.sum += blockchainLatency;
@@ -407,6 +429,7 @@ async function processMessage(topic, message) {
       tableName,
       recordId,
       dbToKafka: dbToKafkaLatency,
+      queueTime: queueTime,
       kafkaToConsumer: kafkaToConsumerLatency,
       consumerToBlockchain: blockchainLatency,
       totalLatency
@@ -414,7 +437,7 @@ async function processMessage(topic, message) {
 
     // Log event
     const status = success ? '[OK]' : '[X]';
-    console.log(`${status} ${tableName} ${recordId} | DB->Kafka: ${dbToKafkaLatency.toFixed(3)}ms | Kafka->Consumer: ${kafkaToConsumerLatency}ms | Consumer->Blockchain: ${blockchainLatency}ms`);
+    console.log(`${status} ${tableName} ${recordId} | DB->Kafka: ${dbToKafkaLatency.toFixed(3)}ms | Queue: ${queueTime}ms | Kafka->Consumer: ${kafkaToConsumerLatency}ms | Consumer->Blockchain: ${blockchainLatency}ms`);
 
     // Update last processing end time for next message's Kafka delivery calculation
     lastProcessingEndTime = Date.now();
@@ -466,8 +489,8 @@ async function main() {
     topics.forEach(t => console.log(`  - ${t}`));
     await consumer.subscribe({ topics, fromBeginning: false });
 
-    // Start monitoring
-    metrics.startTime = Date.now();
+    // Timer starts on first event, not here
+    metrics.startTime = null;
     console.log(`\n[OK] Monitoring started at ${new Date().toISOString()}`);
     console.log('     Runs forever - make changes in ERPNext to generate CDC events.\n');
 

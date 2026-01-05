@@ -11,3 +11,5 @@ cdc_events_log.json
 .idea
 .log
 .venv
+blockchain_hcm
+iot_hcm

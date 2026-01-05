@@ -8741,12 +8741,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0xB514a5f05f6B51D8f037925Cec5DC707A1658f92",
-      "transactionHash": "0x12d4efd53ee1284279a7467cc413f380ef9f73412b05c512be57c4ee95c741f4"
+      "address": "0x5EC8E41eaB68faAE254B7F86d4db8529934E5fe1",
+      "transactionHash": "0xc81dcbc8f2aec40e6092426353515c9c76d27ca8eee15bd7c967fb7d72fdb112"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-29T17:04:26.553Z",
+  "updatedAt": "2026-01-02T11:58:22.164Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

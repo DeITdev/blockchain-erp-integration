@@ -1031,12 +1031,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0xae7171FCa2c8CB18DDB0d906c14357Bae9790ac6",
-      "transactionHash": "0x4a993d3f5fc0bef115e32a70b5e122360c3156ad87f949c77a0fd828ebb6ca20"
+      "address": "0xD7a106f737D17c01BC12daD32DF236efF6867457",
+      "transactionHash": "0x5ab7c57f2dccdb296d461cb1484a7590db4f842e14e238525c4944bc70a5f7b6"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-29T17:04:26.565Z",
+  "updatedAt": "2026-01-02T11:58:22.175Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

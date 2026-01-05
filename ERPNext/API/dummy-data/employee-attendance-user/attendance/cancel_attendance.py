@@ -71,6 +71,7 @@ class AttendanceCanceller:
 
         self.cancelled_count = 0
         self.failed_count = 0
+        self.start_time = None
 
         logger.info(f"API: {self.base_url}")
         logger.info(f"Company: {COMPANY}")
@@ -159,18 +160,25 @@ class AttendanceCanceller:
             logger.error(f"Error fetching records: {str(e)}")
             return []
 
-    def confirm_cancellation(self, attendance_records):
+    def get_user_count(self, total_records):
+        """Ask user how many records to cancel"""
+        while True:
+            try:
+                count_input = input(f"How many records to cancel? (1-{total_records}, or 'all'): ").strip().lower()
+                if count_input == 'all':
+                    return total_records
+                count = int(count_input)
+                if 1 <= count <= total_records:
+                    return count
+                else:
+                    print(f"Please enter a number between 1 and {total_records}")
+            except ValueError:
+                print("Invalid input. Enter a number or 'all'")
+
+    def confirm_cancellation(self, num_to_cancel):
         """Ask for user confirmation before cancellation"""
-        if not attendance_records:
-            print("No submitted records found.")
-            return False
-
-        print(
-            f"\nWARNING: This will CANCEL ALL {len(attendance_records)} submitted records")
-        print(f"Company: {COMPANY}")
-        response = input("Type 'CANCEL ALL' to confirm: ")
-
-        return response == "CANCEL ALL"
+        response = input(f"Type 'CANCEL' to confirm cancelling {num_to_cancel} record(s): ")
+        return response == "CANCEL"
 
     def cancel_attendance_records(self, records_to_cancel):
         """Cancel all submitted attendance records"""
@@ -183,6 +191,10 @@ class AttendanceCanceller:
                 employee_name = record.get("employee_name", "Unknown")
                 attendance_date = record.get("attendance_date", "Unknown")
 
+                # Start timer on first API call
+                if self.start_time is None:
+                    self.start_time = time.time()
+                    logger.info("[TIMER] Started")
                 self.cancel_doc("Attendance", record_name)
                 self.cancelled_count += 1
                 progress_pct = (i / len(records_to_cancel)) * 100
@@ -206,16 +218,31 @@ class AttendanceCanceller:
         try:
             attendance_records = self.get_all_submitted_attendance_records()
 
-            if not self.confirm_cancellation(attendance_records):
+            if not attendance_records:
+                print("\n⚠️  No submitted records found to cancel.")
+                print("    (Submitted records have docstatus=1)")
+                print("    Try running submit_attendance.py first.")
+                return
+
+            # Ask user how many to cancel
+            num_to_cancel = self.get_user_count(len(attendance_records))
+            
+            # Select records to cancel (first N records)
+            records_to_cancel = attendance_records[:num_to_cancel]
+
+            if not self.confirm_cancellation(num_to_cancel):
                 print("Operation cancelled")
                 return
 
             cancelled_count, failed_count = self.cancel_attendance_records(
-                attendance_records)
+                records_to_cancel)
 
             print("\n=== Summary ===")
             print(f"Cancelled: {cancelled_count}")
             print(f"Failed: {failed_count}")
+            if self.start_time:
+                elapsed = time.time() - self.start_time
+                print(f"Elapsed Time: {elapsed:.2f} seconds")
 
         except Exception as e:
             logger.error(f"Error: {str(e)}")

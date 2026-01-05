@@ -208,7 +208,7 @@ exports.read = async (contractAddress, methodName = 'retrieve', ...methodArgs) =
 
     return value;
   } catch (error) {
-    console.error('[ERROR] Read error:', error.message);
+    console.log('[INFO] Read error:', error.message);
     throw error;
   }
 };

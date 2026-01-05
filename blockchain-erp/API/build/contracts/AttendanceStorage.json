@@ -8769,12 +8769,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0xbc822766538AE0CA52890fF5706626BE1619FD08",
-      "transactionHash": "0x02bd6c328e36c937574309f00e2b8d2789f538b13e158b382dc450cd87edefd2"
+      "address": "0x49426213BCdC0a98F008715a99132a76BE63a805",
+      "transactionHash": "0x00d5ebae1e489b86acf56dececd0228913b593be7dbd117e5c0166a0ade74515"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-29T17:04:26.531Z",
+  "updatedAt": "2026-01-02T11:58:22.151Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",

@@ -555,12 +555,12 @@
     "1337": {
       "events": {},
       "links": {},
-      "address": "0x92EFC062c4257AB890fA964Da0381f0E8D689496",
-      "transactionHash": "0x9cdf6881036f9c05472bab1e6017bb3f34dcc26c3e0f8b68ad30bde07739393d"
+      "address": "0x7DDE5beCCA34d20126ca88Ff6b2E9b623B1b9682",
+      "transactionHash": "0x81f0b206dd4503bb5f2440eb8c3f9e9a0a1f5cdda82ac320a00518400834fda0"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-12-29T17:04:26.527Z",
+  "updatedAt": "2026-01-02T11:58:22.148Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",
