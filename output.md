@@ -82,6 +82,32 @@ Both contracts implement identical storage logic, enabling consistent data integ
 
 ---
 
+## 2.6 System Architecture
+
+The system is deployed on a development laptop running Ubuntu OS with Docker Desktop, utilizing hardware specifications of 16 CPU cores, 32 GB RAM, and 2 TB storage. All components are containerized using Docker to ensure environment isolation, reproducibility, and simplified deployment management.
+
+**Table: System Component Architecture**
+
+| Component | Port | Description |
+|-----------|------|-------------|
+| ERPNext Application | 8080 | Web-based ERP interface for HR management |
+| API Authentication | 8080 | ERPNext REST API for programmatic access |
+| DB Authentication (MariaDB) | 3306 | Primary transactional database with binary logging enabled |
+| Kafka | 29092 | Distributed message broker for event streaming |
+| Debezium Connector | 8083 | CDC engine monitoring MariaDB binary logs |
+| CDC Consumer ERPNext | 4000 | Event processor consuming Kafka messages and writing to blockchain |
+| API Smart Contract | 3000 | REST API layer for blockchain interaction |
+| Hyperledger Besu Node 1 | 8545 | Validator node (primary RPC endpoint) |
+| Hyperledger Besu Node 2 | 8546 | Validator node |
+| Hyperledger Besu Node 3 | 8547 | Validator node |
+| Hyperledger Besu Node 4 | 8548 | Validator node |
+
+The architecture implements a layered design separating concerns across three tiers. The **Application Layer** comprises ERPNext and its authentication APIs, providing the user interface and programmatic access for HR operations. The **Middleware Layer** consists of the CDC pipeline (Debezium and Kafka) that captures database changes in real-time without impacting ERP performance. The **Blockchain Layer** includes the Smart Contract API and a four-node Hyperledger Besu network configured with IBFT 2.0 consensus, providing Byzantine fault tolerance while maintaining practical throughput.
+
+Docker Desktop enables the entire distributed system to run locally on a single machine, simulating a production multi-node environment for development and testing purposes. This containerized approach allows horizontal scaling of individual components—additional Kafka brokers or Besu nodes can be provisioned without modifying the core architecture. Network isolation between containers ensures that blockchain nodes communicate exclusively through designated ports, while the CDC Consumer maintains unidirectional data flow from the ERP database to the immutable ledger.
+
+---
+
 ## 3.1 ERPNext Custom Application Implementation
 
 ### 3.1.1 DocType
